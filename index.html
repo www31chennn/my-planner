@@ -42,18 +42,9 @@ async function apiCall(params) {
   } catch { return null; }
 }
 
-async function readSheet(user, sheet) {
-  return await apiCall({ action:"read", user, sheet });
-}
-async function writeSheet(user, sheet, data) {
-  return await apiCall({ action:"write", user, sheet, data: JSON.stringify(data) });
-}
-async function authUser(user, password, displayName) {
-  return await apiCall({ action:"auth", user, password, displayName });
-}
-async function updateDisplayName(user, password, displayName) {
-  return await apiCall({ action:"updateName", user, password, displayName });
-}
+async function readSheet(user, sheet) { return await apiCall({ action:"read", user, sheet }); }
+async function writeSheet(user, sheet, data) { return await apiCall({ action:"write", user, sheet, data: JSON.stringify(data) }); }
+async function updateDisplayName(user, password, displayName) { return await apiCall({ action:"updateName", user, password, displayName }); }
 
 const MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const DAYS_IN_MONTH = (m, y) => new Date(y, m, 0).getDate();
@@ -72,80 +63,87 @@ function CoverPage({ onLogin }) {
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [isNew, setIsNew] = useState(false);
-  const [checked, setChecked] = useState(false);
+  const [step, setStep] = useState("login"); // login | nickname
+  const [pendingUser, setPendingUser] = useState(null);
 
-  async function handleCheck() {
+  async function handleEnter() {
     if (!username.trim() || !password.trim()) { setError("請填寫帳號和密碼"); return; }
     setLoading(true); setError("");
-    const res = await authUser(username.trim(), password.trim(), "");
+    // 直接嘗試登入，讓 Apps Script 判斷是新用戶還是舊用戶
+    const res = await apiCall({ action:"auth", user: username.trim(), password: password.trim(), displayName: "" });
     setLoading(false);
     if (!res) { setError("連線失敗，請稍後再試"); return; }
-    if (res.isNew) { setIsNew(true); setChecked(true); setDisplayName(username.trim()); }
-    else if (res.ok) { onLogin(username.trim(), password.trim(), res.displayName); }
-    else { setError(res.error || "密碼錯誤"); }
+    if (res.isNew) {
+      // 新用戶：進入設定暱稱步驟
+      setPendingUser({ user: username.trim(), password: password.trim() });
+      setDisplayName(username.trim());
+      setStep("nickname");
+    } else if (res.ok) {
+      onLogin(username.trim(), password.trim(), res.displayName);
+    } else {
+      setError(res.error || "密碼錯誤");
+    }
   }
 
-  async function handleRegister() {
-    if (!displayName.trim()) { setError("請輸入你的暱稱"); return; }
+  async function handleSetNickname() {
+    if (!displayName.trim()) { setError("請輸入暱稱"); return; }
     setLoading(true); setError("");
-    const res = await authUser(username.trim(), password.trim(), displayName.trim());
+    // 用 updateName 更新暱稱，不再呼叫 auth
+    const res = await updateDisplayName(pendingUser.user, pendingUser.password, displayName.trim());
     setLoading(false);
-    if (res && res.ok) onLogin(username.trim(), password.trim(), displayName.trim());
-    else setError("建立失敗，請稍後再試");
+    if (res && res.ok) {
+      onLogin(pendingUser.user, pendingUser.password, displayName.trim());
+    } else {
+      setError("建立失敗，請稍後再試");
+    }
   }
 
   return (
     <div className="fade-in" style={{ height:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:C.bg, padding:"0 32px" }}>
       <div style={{ width:"100%", maxWidth:360 }}>
-        {/* Logo */}
         <div style={{ textAlign:"center", marginBottom:48 }}>
           <div style={{ fontSize:48, marginBottom:12 }}>📓</div>
           <div style={{ fontSize:28, fontFamily:"'Noto Serif TC', serif", fontWeight:700, color:C.text }}>計畫本</div>
           <div style={{ fontSize:13, color:C.sub, marginTop:6 }}>記錄你的每一天</div>
         </div>
 
-        {!checked ? (
+        {step === "login" && (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div>
               <div style={{ fontSize:12, color:C.sub, marginBottom:6 }}>帳號</div>
               <input value={username} onChange={e => setUsername(e.target.value)}
-                placeholder="輸入帳號（英文或中文）"
-                style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }}
-                onKeyDown={e => e.key==="Enter" && handleCheck()}
-              />
+                placeholder="輸入帳號" onKeyDown={e => e.key==="Enter" && handleEnter()}
+                style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }} />
             </div>
             <div>
               <div style={{ fontSize:12, color:C.sub, marginBottom:6 }}>密碼</div>
               <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="輸入密碼"
-                style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }}
-                onKeyDown={e => e.key==="Enter" && handleCheck()}
-              />
+                placeholder="輸入密碼" onKeyDown={e => e.key==="Enter" && handleEnter()}
+                style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }} />
             </div>
             {error && <div style={{ fontSize:13, color:C.red, textAlign:"center" }}>{error}</div>}
-            <button onClick={handleCheck} disabled={loading}
-              style={{ width:"100%", padding:"14px 0", borderRadius:12, border:"none", background:C.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginTop:4, opacity: loading ? 0.7 : 1 }}>
+            <button onClick={handleEnter} disabled={loading}
+              style={{ width:"100%", padding:"14px 0", borderRadius:12, border:"none", background:C.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", marginTop:4, opacity:loading?0.7:1 }}>
               {loading ? "連線中…" : "進入"}
             </button>
             <div style={{ fontSize:12, color:C.sub, textAlign:"center" }}>第一次使用會自動建立帳號</div>
           </div>
-        ) : (
-          <div style={{ display:"flex", flexDirection:"column", gap:14 }} className="fade-in">
+        )}
+
+        {step === "nickname" && (
+          <div className="fade-in" style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div style={{ background:C.accentLight, borderRadius:12, padding:"14px 16px", fontSize:14, color:C.accent }}>
-              👋 歡迎！這是你第一次使用，請設定你的暱稱
+              👋 歡迎！帳號建立成功，請設定你的暱稱
             </div>
             <div>
               <div style={{ fontSize:12, color:C.sub, marginBottom:6 }}>你的暱稱</div>
               <input value={displayName} onChange={e => setDisplayName(e.target.value)}
-                placeholder="例如：小美、阿明…"
-                style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }}
-                onKeyDown={e => e.key==="Enter" && handleRegister()}
-              />
+                placeholder="例如：小美、阿明…" onKeyDown={e => e.key==="Enter" && handleSetNickname()}
+                style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }} />
             </div>
             {error && <div style={{ fontSize:13, color:C.red, textAlign:"center" }}>{error}</div>}
-            <button onClick={handleRegister} disabled={loading}
-              style={{ width:"100%", padding:"14px 0", borderRadius:12, border:"none", background:C.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", opacity: loading ? 0.7 : 1 }}>
+            <button onClick={handleSetNickname} disabled={loading}
+              style={{ width:"100%", padding:"14px 0", borderRadius:12, border:"none", background:C.accent, color:"#fff", fontSize:16, fontWeight:600, cursor:"pointer", opacity:loading?0.7:1 }}>
               {loading ? "建立中…" : "開始使用"}
             </button>
           </div>
@@ -155,7 +153,6 @@ function CoverPage({ onLogin }) {
   );
 }
 
-// ── Save Dot ──────────────────────────────────────────────
 function SaveDot({ saving }) {
   return (
     <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color: saving ? C.sub : C.accent }}>
@@ -165,7 +162,6 @@ function SaveDot({ saving }) {
   );
 }
 
-// ── Year Goals ────────────────────────────────────────────
 function YearGoals({ data, setData, saving, year }) {
   const done = data.filter(g => g.done && g.text).length;
   const total = data.filter(g => g.text).length;
@@ -186,12 +182,12 @@ function YearGoals({ data, setData, saving, year }) {
       </div>
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {data.map((goal, i) => (
-          <div key={i} className="fade-up" style={{ display:"flex", alignItems:"center", gap:12, background:C.card, borderRadius:14, padding:"13px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", opacity: goal.done ? 0.45 : 1, animationDelay:`${i*25}ms` }}>
+          <div key={i} className="fade-up" style={{ display:"flex", alignItems:"center", gap:12, background:C.card, borderRadius:14, padding:"13px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", opacity:goal.done?0.45:1, animationDelay:`${i*25}ms` }}>
             <button onClick={() => { const n=[...data]; n[i]={...n[i],done:!n[i].done}; setData(n); }}
-              style={{ width:22, height:22, borderRadius:11, border:`2px solid ${goal.done ? C.accent : C.border}`, background: goal.done ? C.accent : "transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, padding:0, transition:"all 0.2s" }}>
+              style={{ width:22, height:22, borderRadius:11, border:`2px solid ${goal.done?C.accent:C.border}`, background:goal.done?C.accent:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, padding:0, transition:"all 0.2s" }}>
               {goal.done && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7.5L10 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
             </button>
-            <input style={{ flex:1, border:"none", outline:"none", fontSize:15, background:"transparent", textDecoration: goal.done?"line-through":"none", color: goal.done?C.sub:C.text }}
+            <input style={{ flex:1, border:"none", outline:"none", fontSize:15, background:"transparent", textDecoration:goal.done?"line-through":"none", color:goal.done?C.sub:C.text }}
               placeholder={`目標 ${i+1}`} value={goal.text}
               onChange={e => { const n=[...data]; n[i]={...n[i],text:e.target.value}; setData(n); }} />
           </div>
@@ -201,18 +197,14 @@ function YearGoals({ data, setData, saving, year }) {
   );
 }
 
-// ── Month Planner ─────────────────────────────────────────
 function MonthPlanner({ data, setData, saving, year }) {
   const [selected, setSelected] = useState(null);
 
   if (selected !== null) {
-    const m = selected;
-    const mData = data[m] || {};
-    const mode = mData.mode || "plan";
-    const marked = mData.marked || {};
-    const setMode = md => setData(p => ({...p, [m]: {...(p[m]||{}), mode: md}}));
-    const updatePlan = t => setData(p => ({...p, [m]: {...(p[m]||{}), plan: t}}));
-    const toggleDay = d => setData(p => ({...p, [m]: {...(p[m]||{}), marked: {...marked, [d]: !marked[d]}}}));
+    const m = selected, mData = data[m] || {}, mode = mData.mode || "plan", marked = mData.marked || {};
+    const setMode = md => setData(p => ({...p, [m]: {...(p[m]||{}), mode:md}}));
+    const updatePlan = t => setData(p => ({...p, [m]: {...(p[m]||{}), plan:t}}));
+    const toggleDay = d => setData(p => ({...p, [m]: {...(p[m]||{}), marked:{...marked,[d]:!marked[d]}}}));
 
     return (
       <div style={{ padding:"20px 20px 120px" }}>
@@ -287,7 +279,6 @@ function MonthPlanner({ data, setData, saving, year }) {
   );
 }
 
-// ── Daily Note ────────────────────────────────────────────
 function DailyNote({ data, setData, saving }) {
   const today = new Date().toISOString().slice(0,10);
   const [date, setDate] = useState(today);
@@ -312,19 +303,17 @@ function DailyNote({ data, setData, saving }) {
   );
 }
 
-// ── Settings Modal ────────────────────────────────────────
 function SettingsModal({ user, password, plannerName, setPlannerName, onClose, onLogout }) {
   const [name, setName] = useState(plannerName);
   const [nickname, setNickname] = useState("");
-  const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  async function saveName() {
-    setSaving(true);
-    setPlannerName(name.trim() || "計畫本");
-    localStorage.setItem("plannerName_" + user, name.trim() || "計畫本");
-    setMsg("已儲存！");
-    setSaving(false);
+  async function savePlannerName() {
+    const val = name.trim() || "計畫本";
+    setPlannerName(val);
+    localStorage.setItem("plannerName_"+user, val);
+    setMsg("計畫本名稱已儲存！");
     setTimeout(() => setMsg(""), 2000);
   }
 
@@ -334,7 +323,7 @@ function SettingsModal({ user, password, plannerName, setPlannerName, onClose, o
     const res = await updateDisplayName(user, password, nickname.trim());
     setSaving(false);
     if (res && res.ok) { setMsg("暱稱已更新！"); setTimeout(() => setMsg(""), 2000); }
-    else setMsg("更新失敗");
+    else setMsg("更新失敗，請再試一次");
   }
 
   return (
@@ -344,45 +333,38 @@ function SettingsModal({ user, password, plannerName, setPlannerName, onClose, o
           <div style={{ fontSize:18, fontWeight:700, color:C.text }}>設定</div>
           <button onClick={onClose} style={{ background:C.border, border:"none", borderRadius:10, width:32, height:32, cursor:"pointer", fontSize:16 }}>✕</button>
         </div>
-
         <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
           <div>
             <div style={{ fontSize:12, color:C.sub, marginBottom:8 }}>計畫本名稱</div>
             <div style={{ display:"flex", gap:8 }}>
               <input value={name} onChange={e => setName(e.target.value)}
                 style={{ flex:1, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"10px 14px", fontSize:15, color:C.text, background:C.bg, outline:"none" }} />
-              <button onClick={saveName} style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"10px 16px", cursor:"pointer", fontSize:14, fontWeight:600 }}>儲存</button>
+              <button onClick={savePlannerName} style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"10px 16px", cursor:"pointer", fontSize:14, fontWeight:600 }}>儲存</button>
             </div>
           </div>
-
           <div>
             <div style={{ fontSize:12, color:C.sub, marginBottom:8 }}>更新暱稱</div>
             <div style={{ display:"flex", gap:8 }}>
-              <input value={nickname} onChange={e => setNickname(e.target.value)} placeholder="新暱稱"
+              <input value={nickname} onChange={e => setNickname(e.target.value)} placeholder="輸入新暱稱"
                 style={{ flex:1, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"10px 14px", fontSize:15, color:C.text, background:C.bg, outline:"none" }} />
-              <button onClick={saveNickname} style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"10px 16px", cursor:"pointer", fontSize:14, fontWeight:600 }}>更新</button>
+              <button onClick={saveNickname} disabled={saving} style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"10px 16px", cursor:"pointer", fontSize:14, fontWeight:600, opacity:saving?0.7:1 }}>更新</button>
             </div>
           </div>
-
           {msg && <div style={{ fontSize:13, color:C.accent, textAlign:"center" }}>{msg}</div>}
-
-          <button onClick={onLogout} style={{ width:"100%", padding:"13px 0", borderRadius:12, border:`1.5px solid ${C.red}`, background:"none", color:C.red, fontSize:15, fontWeight:600, cursor:"pointer", marginTop:8 }}>
-            登出
-          </button>
+          <button onClick={onLogout} style={{ width:"100%", padding:"13px 0", borderRadius:12, border:`1.5px solid ${C.red}`, background:"none", color:C.red, fontSize:15, fontWeight:600, cursor:"pointer", marginTop:8 }}>登出</button>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Main App ──────────────────────────────────────────────
 const TABS = [
   { id:"goals", label:"年度目標", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6"/><circle cx="10" cy="10" r="4" stroke="currentColor" strokeWidth="1.6"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/></svg> },
   { id:"month",  label:"月份計畫", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="M7 2v4M13 2v4M3 9h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg> },
   { id:"daily",  label:"當日記錄", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg> },
 ];
 
-function MainApp({ user, password, displayName }) {
+function MainApp({ user, password, displayName: initDisplayName }) {
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
   const [tab, setTab] = useState(0);
@@ -393,6 +375,7 @@ function MainApp({ user, password, displayName }) {
   const [saving, setSaving] = useState({ goals:false, month:false, daily:false });
   const [showSettings, setShowSettings] = useState(false);
   const [plannerName, setPlannerName] = useState(localStorage.getItem("plannerName_"+user) || "計畫本");
+  const [displayName, setDisplayName] = useState(initDisplayName);
   const timers = { goals:useRef(null), month:useRef(null), daily:useRef(null) };
   const touchStart = useRef(null);
 
@@ -419,9 +402,9 @@ function MainApp({ user, password, displayName }) {
     };
   }
 
-  const setGoals = autoSave("goals", setGoalsState, val => writeSheet(user, "goals", val.map(g => [g.text, String(g.done)])));
-  const setMonthData = autoSave("month", setMonthState, val => writeSheet(user, "month", Object.entries(val).map(([k,v]) => [k, JSON.stringify(v)])));
-  const setDailyData = autoSave("daily", setDailyState, val => writeSheet(user, "daily", Object.entries(val).map(([k,v]) => [k, v])));
+  const setGoals = autoSave("goals", setGoalsState, val => writeSheet(user,"goals",val.map(g=>[g.text,String(g.done)])));
+  const setMonthData = autoSave("month", setMonthState, val => writeSheet(user,"month",Object.entries(val).map(([k,v])=>[k,JSON.stringify(v)])));
+  const setDailyData = autoSave("daily", setDailyState, val => writeSheet(user,"daily",Object.entries(val).map(([k,v])=>[k,v])));
 
   const handleTouchStart = e => { touchStart.current = e.touches[0].clientX; };
   const handleTouchEnd = e => {
@@ -450,7 +433,6 @@ function MainApp({ user, password, displayName }) {
 
   return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:C.bg, maxWidth:430, margin:"0 auto", position:"relative", overflow:"hidden" }}>
-      {/* Header */}
       <div style={{ padding:"52px 20px 16px", background:C.bg, flexShrink:0, borderBottom:`1px solid ${C.border}` }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <button onClick={() => setShowSettings(true)} style={{ background:"none", border:"none", cursor:"pointer", textAlign:"left", padding:0 }}>
@@ -464,7 +446,6 @@ function MainApp({ user, password, displayName }) {
         </div>
       </div>
 
-      {/* Panels */}
       <div style={{ flex:1, overflow:"hidden" }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         <div className="swipe-container" style={{ transform:`translateX(${-tab*33.333}%)` }}>
           <div className="swipe-panel"><YearGoals data={goals} setData={setGoals} saving={saving.goals} year={year} /></div>
@@ -473,7 +454,6 @@ function MainApp({ user, password, displayName }) {
         </div>
       </div>
 
-      {/* Bottom nav */}
       <div style={{ background:"rgba(247,245,242,0.95)", backdropFilter:"blur(16px)", borderTop:`1px solid ${C.border}`, display:"flex", padding:"10px 0 28px", flexShrink:0 }}>
         {TABS.map((t,i) => (
           <button key={t.id} onClick={() => setTab(i)}
@@ -492,7 +472,6 @@ function MainApp({ user, password, displayName }) {
   );
 }
 
-// ── Root ──────────────────────────────────────────────────
 function Root() {
   const [session, setSession] = useState(() => {
     try { return JSON.parse(localStorage.getItem("session")); } catch { return null; }
