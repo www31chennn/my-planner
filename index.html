@@ -34,7 +34,12 @@
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-const API = "/.netlify/functions/api";
+// 自動偵測平台，不用手動改
+const API = (() => {
+  const host = window.location.hostname;
+  if (host.includes("netlify")) return "/.netlify/functions/api";
+  return "/api/proxy"; // Vercel 或其他
+})();
 
 // 密碼 SHA-256 加密
 async function hashPassword(password) {
