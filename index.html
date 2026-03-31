@@ -543,9 +543,11 @@ function MainApp({ user, password, displayName:initName }) {
             <div style={{ fontSize:20, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text }}>{plannerName}</div>
             <div style={{ fontSize:12, color:C.sub, marginTop:2 }}>{initName} ✎</div>
           </button>
-          <select value={year} onChange={e=>setYear(Number(e.target.value))} style={{ border:`1.5px solid ${C.border}`, borderRadius:10, padding:"6px 10px", fontSize:14, color:C.text, background:C.card, outline:"none", cursor:"pointer" }}>
-            {yearOptions.map(y=><option key={y} value={y}>{y} 年</option>)}
-          </select>
+          {tab !== 2 && (
+            <select value={year} onChange={e=>setYear(Number(e.target.value))} style={{ border:`1.5px solid ${C.border}`, borderRadius:10, padding:"6px 10px", fontSize:14, color:C.text, background:C.card, outline:"none", cursor:"pointer" }}>
+              {yearOptions.map(y=><option key={y} value={y}>{y} 年</option>)}
+            </select>
+          )}
         </div>
       </div>
 
