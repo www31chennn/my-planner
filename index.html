@@ -74,6 +74,30 @@ async function deleteOne(user, sheet, key) {
   return await apiCall({ action:"deleteOne", user, sheet, key: String(key) });
 }
 
+// ── 全域快取 ──────────────────────────────────────────────
+// 資料第一次從 API 載入後存在這裡，切換頁面不用重新請求
+const CACHE = {};
+function cacheGet(user, sheet, key) {
+  return CACHE[`${user}:${sheet}:${key}`];
+}
+function cacheSet(user, sheet, key, value) {
+  CACHE[`${user}:${sheet}:${key}`] = value;
+}
+function cacheHas(user, sheet, key) {
+  return `${user}:${sheet}:${key}` in CACHE;
+}
+
+async function cachedReadOne(user, sheet, key) {
+  if (cacheHas(user, sheet, key)) return cacheGet(user, sheet, key);
+  const val = await apiCall({ action:"readOne", user, sheet, key:String(key) });
+  cacheSet(user, sheet, key, val ?? "");
+  return val ?? "";
+}
+
+function cacheUpdate(user, sheet, key, value) {
+  cacheSet(user, sheet, key, value);
+}
+
 const MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const DAYS_IN_MONTH = (m,y) => new Date(y,m,0).getDate();
 const FIRST_DAY = (m,y) => new Date(y,m-1,1).getDay();
@@ -176,7 +200,7 @@ function YearGoals({ user, saving, setSaving, year }) {
 
   useEffect(() => {
     setLoaded(false);
-    apiCall({ action:"readOne", user, sheet:"goals", key:String(year) }).then(val => {
+    cachedReadOne(user, "goals", String(year)).then(val => {
       try { setList(val ? JSON.parse(val) : []); } catch { setList([]); }
       setLoaded(true);
     });
@@ -184,6 +208,7 @@ function YearGoals({ user, saving, setSaving, year }) {
 
   function save(next) {
     setList(next);
+    cacheUpdate(user, "goals", String(year), JSON.stringify(next));
     setSaving(p=>({...p,goals:true}));
     clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
@@ -291,7 +316,7 @@ function MonthPlanner({ user, saving, setSaving, year }) {
   async function loadMonth(m) {
     const key = getKey(m);
     if (monthCache[key] !== undefined) return;
-    const val = await apiCall({ action:"readOne", user, sheet:"month", key });
+    const val = await cachedReadOne(user, "month", key);
     try {
       setMonthCache(p => ({ ...p, [key]: val ? JSON.parse(val) : {} }));
     } catch {
@@ -307,6 +332,7 @@ function MonthPlanner({ user, saving, setSaving, year }) {
   function saveMonth(m, data) {
     const key = getKey(m);
     setMonthCache(p => ({ ...p, [key]: data }));
+    cacheUpdate(user, "month", key, JSON.stringify(data));
     setSaving(p=>({...p,month:true}));
     clearTimeout(timers.current[key]);
     timers.current[key] = setTimeout(async () => {
@@ -422,7 +448,7 @@ function DailyNote({ user, saving, setSaving }) {
 
   useEffect(() => {
     if (noteCache[date] !== undefined) return;
-    apiCall({ action:"readOne", user, sheet:"daily", key:date }).then(val => {
+    cachedReadOne(user, "daily", date).then(val => {
       setNoteCache(p => ({ ...p, [date]: val || "" }));
     });
   }, [date]);
@@ -431,6 +457,7 @@ function DailyNote({ user, saving, setSaving }) {
 
   function save(text) {
     setNoteCache(p => ({ ...p, [date]: text }));
+    cacheUpdate(user, "daily", date, text);
     setSaving(p=>({...p,daily:true}));
     clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
@@ -540,12 +567,12 @@ function MainApp({ user, password, displayName:initName }) {
   const [appLoading, setAppLoading] = useState(true);
   const touchStart = useRef(null);
 
-  // 進入 App 時先載入當年目標 + 當日記錄，載完才顯示畫面
+  // 進入 App 時預載入當年目標 + 當日記錄，同時存進快取
   useEffect(()=>{
     const today = new Date().toISOString().slice(0,10);
     Promise.all([
-      apiCall({ action:"readOne", user, sheet:"goals", key:String(thisYear) }),
-      apiCall({ action:"readOne", user, sheet:"daily", key:today }),
+      cachedReadOne(user, "goals", String(thisYear)),
+      cachedReadOne(user, "daily", today),
     ]).then(()=>setAppLoading(false));
   },[]);
 
