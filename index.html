@@ -202,7 +202,11 @@ function YearGoals({ user, saving, setSaving, year }) {
   const done = list.filter(g=>g.done&&g.text).length;
   const total = list.filter(g=>g.text).length;
 
-  if (!loaded) return <div style={{ padding:40, textAlign:"center", color:C.sub, fontSize:14 }}>載入中…</div>;
+  if (!loaded) return (
+    <div style={{ padding:40, display:"flex", justifyContent:"center" }}>
+      <div style={{ width:28, height:28, borderRadius:14, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
+    </div>
+  );
 
   return (
     <div style={{ padding:"20px 20px 120px" }}>
@@ -316,7 +320,9 @@ function MonthPlanner({ user, saving, setSaving, year }) {
     const mData = monthCache[key];
 
     if (mData === undefined) return (
-      <div style={{ padding:40, textAlign:"center", color:C.sub, fontSize:14 }}>載入中…</div>
+      <div style={{ padding:40, display:"flex", justifyContent:"center" }}>
+        <div style={{ width:28, height:28, borderRadius:14, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
+      </div>
     );
 
     const mode = mData.mode||"plan", marked = mData.marked||{};
@@ -451,7 +457,9 @@ function DailyNote({ user, saving, setSaving }) {
       <input type="date" value={date} onChange={e=>setDate(e.target.value)}
         style={{ width:"100%", maxWidth:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"11px 14px", fontSize:14, color:C.text, background:C.card, outline:"none", marginBottom:16, display:"block", WebkitAppearance:"none", appearance:"none" }} />
       {note === null ? (
-        <div style={{ textAlign:"center", padding:"20px 0", color:C.sub, fontSize:14 }}>載入中…</div>
+        <div style={{ padding:20, display:"flex", justifyContent:"center" }}>
+          <div style={{ width:28, height:28, borderRadius:14, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
+        </div>
       ) : (
         <>
           {!note && <div style={{ textAlign:"center", padding:"20px 0 12px", color:C.sub, fontSize:14 }}>這天還沒有記錄</div>}
@@ -529,7 +537,24 @@ function MainApp({ user, password, displayName:initName }) {
   const [saving, setSaving] = useState({goals:false,month:false,daily:false});
   const [showSettings, setShowSettings] = useState(false);
   const [plannerName, setPlannerName] = useState(localStorage.getItem("plannerName_"+user)||"計畫本");
+  const [appLoading, setAppLoading] = useState(true);
   const touchStart = useRef(null);
+
+  // 進入 App 時先載入當年目標 + 當日記錄，載完才顯示畫面
+  useEffect(()=>{
+    const today = new Date().toISOString().slice(0,10);
+    Promise.all([
+      apiCall({ action:"readOne", user, sheet:"goals", key:String(thisYear) }),
+      apiCall({ action:"readOne", user, sheet:"daily", key:today }),
+    ]).then(()=>setAppLoading(false));
+  },[]);
+
+  if (appLoading) return (
+    <div style={{ height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16, background:C.bg }}>
+      <div style={{ width:36, height:36, borderRadius:18, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
+      <div style={{ color:C.sub, fontSize:14 }}>載入 {initName} 的資料…</div>
+    </div>
+  );
 
   const handleTouchStart=e=>{touchStart.current=e.touches[0].clientX;};
   const handleTouchEnd=e=>{
