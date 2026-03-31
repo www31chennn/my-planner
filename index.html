@@ -61,6 +61,10 @@ async function readSheet(user, sheetKey) {
 
 // 寫入 sheet - 把資料序列化成單一 JSON 字串存在第一格
 async function writeSheetJson(user, sheetKey, jsonData) {
+  if (jsonData === undefined || jsonData === null) {
+    console.warn(`writeSheetJson: jsonData is ${jsonData} for ${sheetKey}, skipping`);
+    return;
+  }
   const serialized = JSON.stringify(jsonData);
   console.log(`writeSheet ${sheetKey}:`, serialized.slice(0,100));
   const res = await apiPost({ action:"write", user, sheet: sheetKey, data: JSON.stringify([["data", serialized]]) });
@@ -470,21 +474,29 @@ function MainApp({ user, password, displayName:initName }) {
     load();
   },[]);
 
-  function autoSave(key, setter, sheetKey) {
-    return (val)=>{
-      setter(val);
+  const latestGoals = useRef(goals);
+  const latestMonth = useRef(monthData);
+  const latestDaily = useRef(dailyData);
+
+  function makeSet(key, stateSetter, latestRef, sheetKey) {
+    return (updater) => {
+      const prev = latestRef.current;
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      latestRef.current = next;
+      stateSetter(next);
       setSaving(p=>({...p,[key]:true}));
       clearTimeout(timers[key].current);
       timers[key].current = setTimeout(async()=>{
-        await writeSheetJson(user, sheetKey, val);
+        console.log("saving " + sheetKey + ":", JSON.stringify(latestRef.current).slice(0,80));
+        await writeSheetJson(user, sheetKey, latestRef.current);
         setSaving(p=>({...p,[key]:false}));
       }, 1500);
     };
   }
 
-  const setGoals = autoSave("goals", setGoalsState, "goals");
-  const setMonthData = autoSave("month", setMonthState, "month");
-  const setDailyData = autoSave("daily", setDailyState, "daily");
+  const setGoals = makeSet("goals", setGoalsState, latestGoals, "goals");
+  const setMonthData = makeSet("month", setMonthState, latestMonth, "month");
+  const setDailyData = makeSet("daily", setDailyState, latestDaily, "daily");
 
   const handleTouchStart=e=>{touchStart.current=e.touches[0].clientX;};
   const handleTouchEnd=e=>{
