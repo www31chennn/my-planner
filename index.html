@@ -328,16 +328,21 @@ function MonthPlanner({ user, saving, setSaving, year }) {
   useEffect(() => {
     setListLoaded(false);
     apiCall({ action:"readAll", user, sheet:"month" }).then(rows => {
-      if (!Array.isArray(rows)) { setListLoaded(true); return; }
       const newCache = {};
-      rows.forEach(r => {
-        if (!r[0] || r[0] === "key") return;
-        try { newCache[String(r[0])] = JSON.parse(r[1]); } catch { newCache[String(r[0])] = {}; }
-      });
-      // 合併進快取和本地 state
-      rows.forEach(r => {
-        if (r[0] && r[0] !== "key") cacheUpdate(user, "month", String(r[0]), r[1]||"");
-      });
+      // 先把所有月份都設為空（代表已載入，只是沒資料）
+      for (let m = 1; m <= 12; m++) {
+        newCache[`${year}_${m}`] = {};
+      }
+      // 再把有資料的月份蓋上去
+      if (Array.isArray(rows)) {
+        rows.forEach(r => {
+          if (!r[0] || r[0] === "key") return;
+          // 只處理當年的資料
+          if (!String(r[0]).startsWith(String(year))) return;
+          try { newCache[String(r[0])] = JSON.parse(r[1]); } catch { newCache[String(r[0])] = {}; }
+          cacheUpdate(user, "month", String(r[0]), r[1]||"");
+        });
+      }
       setMonthCache(p => ({ ...p, ...newCache }));
       setListLoaded(true);
     });
