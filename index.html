@@ -89,9 +89,12 @@ function cacheHas(user, sheet, key) {
 
 async function cachedReadOne(user, sheet, key) {
   if (cacheHas(user, sheet, key)) return cacheGet(user, sheet, key);
-  const val = await apiCall({ action:"readOne", user, sheet, key:String(key) });
-  cacheSet(user, sheet, key, val ?? "");
-  return val ?? "";
+  const raw = await apiCall({ action:"readOne", user, sheet, key:String(key) });
+  // apiCall 已經做過 JSON.parse，raw 可能是字串、null、或物件
+  // 統一轉成字串存快取
+  const val = (raw === null || raw === undefined) ? "" : String(raw);
+  cacheSet(user, sheet, key, val);
+  return val;
 }
 
 function cacheUpdate(user, sheet, key, value) {
