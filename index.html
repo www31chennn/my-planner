@@ -22,8 +22,10 @@
     @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
     @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
     @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes popIn { from { opacity:0; transform:scale(0.85); } to { opacity:1; transform:scale(1); } }
     .fade-up { animation: fadeUp 0.35s ease forwards; }
     .fade-in { animation: fadeIn 0.4s ease forwards; }
+    .pop-in { animation: popIn 0.2s ease forwards; }
   </style>
 </head>
 <body>
@@ -35,20 +37,25 @@ const API = "https://script.google.com/macros/s/AKfycbw5WUcyCgC0ELH15FBjho-R1w5P
 
 async function apiCall(params) {
   try {
-    const qs = Object.entries(params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+    const qs = Object.entries(params).map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
     const res = await fetch(`${API}?${qs}`);
     const text = await res.text();
     try { return JSON.parse(text); } catch { return text; }
-  } catch { return null; }
+  } catch(e) { console.error("API error", e); return null; }
 }
 
-async function readSheet(user, sheet) { return await apiCall({ action:"read", user, sheet }); }
-async function writeSheet(user, sheet, data) { return await apiCall({ action:"write", user, sheet, data: JSON.stringify(data) }); }
-async function updateDisplayName(user, password, displayName) { return await apiCall({ action:"updateName", user, password, displayName }); }
+async function readSheet(user, sheet) {
+  const res = await apiCall({ action:"read", user, sheet });
+  return Array.isArray(res) ? res : [];
+}
+async function writeSheet(user, sheet, data) {
+  return await apiCall({ action:"write", user, sheet, data: JSON.stringify(data) });
+}
 
 const MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 const DAYS_IN_MONTH = (m, y) => new Date(y, m, 0).getDate();
 const FIRST_DAY = (m, y) => new Date(y, m-1, 1).getDay();
+const MOODS = ["😊","😢","😡","😴","🥰","😰","🎉","💪"];
 
 const C = {
   bg: "#F7F5F2", card: "#FFFFFF", border: "#EBEBEB",
@@ -56,43 +63,42 @@ const C = {
   accentLight: "#EAF2EC", red: "#D0533A",
 };
 
-// ── Cover / Login ─────────────────────────────────────────
+// ── Cover ─────────────────────────────────────────────────
 function CoverPage({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [step, setStep] = useState("login"); // login | nickname
-  const [pendingUser, setPendingUser] = useState(null);
+  const [step, setStep] = useState("login");
+  const [pendingCreds, setPendingCreds] = useState(null);
 
   async function handleEnter() {
     if (!username.trim() || !password.trim()) { setError("請填寫帳號和密碼"); return; }
     setLoading(true); setError("");
-    // 直接嘗試登入，讓 Apps Script 判斷是新用戶還是舊用戶
-    const res = await apiCall({ action:"auth", user: username.trim(), password: password.trim(), displayName: "" });
+    // First call: check if user exists with empty displayName
+    const res = await apiCall({ action:"auth", user:username.trim(), password:password.trim(), displayName:"__check__" });
     setLoading(false);
     if (!res) { setError("連線失敗，請稍後再試"); return; }
     if (res.isNew) {
-      // 新用戶：進入設定暱稱步驟
-      setPendingUser({ user: username.trim(), password: password.trim() });
+      setPendingCreds({ user:username.trim(), password:password.trim() });
       setDisplayName(username.trim());
       setStep("nickname");
-    } else if (res.ok) {
-      onLogin(username.trim(), password.trim(), res.displayName);
-    } else {
+    } else if (res.ok === false) {
       setError(res.error || "密碼錯誤");
+    } else {
+      onLogin(username.trim(), password.trim(), res.displayName || username.trim());
     }
   }
 
   async function handleSetNickname() {
     if (!displayName.trim()) { setError("請輸入暱稱"); return; }
     setLoading(true); setError("");
-    // 用 updateName 更新暱稱，不再呼叫 auth
-    const res = await updateDisplayName(pendingUser.user, pendingUser.password, displayName.trim());
+    // Update the displayName that was set to __check__ during registration
+    const res = await apiCall({ action:"updateName", user:pendingCreds.user, password:pendingCreds.password, displayName:displayName.trim() });
     setLoading(false);
     if (res && res.ok) {
-      onLogin(pendingUser.user, pendingUser.password, displayName.trim());
+      onLogin(pendingCreds.user, pendingCreds.password, displayName.trim());
     } else {
       setError("建立失敗，請稍後再試");
     }
@@ -106,19 +112,18 @@ function CoverPage({ onLogin }) {
           <div style={{ fontSize:28, fontFamily:"'Noto Serif TC', serif", fontWeight:700, color:C.text }}>計畫本</div>
           <div style={{ fontSize:13, color:C.sub, marginTop:6 }}>記錄你的每一天</div>
         </div>
-
         {step === "login" && (
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div>
               <div style={{ fontSize:12, color:C.sub, marginBottom:6 }}>帳號</div>
-              <input value={username} onChange={e => setUsername(e.target.value)}
-                placeholder="輸入帳號" onKeyDown={e => e.key==="Enter" && handleEnter()}
+              <input value={username} onChange={e => setUsername(e.target.value)} placeholder="輸入帳號"
+                onKeyDown={e => e.key==="Enter" && handleEnter()}
                 style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }} />
             </div>
             <div>
               <div style={{ fontSize:12, color:C.sub, marginBottom:6 }}>密碼</div>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="輸入密碼" onKeyDown={e => e.key==="Enter" && handleEnter()}
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="輸入密碼"
+                onKeyDown={e => e.key==="Enter" && handleEnter()}
                 style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }} />
             </div>
             {error && <div style={{ fontSize:13, color:C.red, textAlign:"center" }}>{error}</div>}
@@ -129,16 +134,15 @@ function CoverPage({ onLogin }) {
             <div style={{ fontSize:12, color:C.sub, textAlign:"center" }}>第一次使用會自動建立帳號</div>
           </div>
         )}
-
         {step === "nickname" && (
           <div className="fade-in" style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div style={{ background:C.accentLight, borderRadius:12, padding:"14px 16px", fontSize:14, color:C.accent }}>
-              👋 歡迎！帳號建立成功，請設定你的暱稱
+              👋 帳號建立成功！請設定你的暱稱
             </div>
             <div>
               <div style={{ fontSize:12, color:C.sub, marginBottom:6 }}>你的暱稱</div>
-              <input value={displayName} onChange={e => setDisplayName(e.target.value)}
-                placeholder="例如：小美、阿明…" onKeyDown={e => e.key==="Enter" && handleSetNickname()}
+              <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="例如：小美、阿明…"
+                onKeyDown={e => e.key==="Enter" && handleSetNickname()}
                 style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" }} />
             </div>
             {error && <div style={{ fontSize:13, color:C.red, textAlign:"center" }}>{error}</div>}
@@ -153,18 +157,28 @@ function CoverPage({ onLogin }) {
   );
 }
 
+// ── Save Dot ──────────────────────────────────────────────
 function SaveDot({ saving }) {
   return (
-    <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color: saving ? C.sub : C.accent }}>
-      <div style={{ width:6, height:6, borderRadius:3, background: saving ? C.sub : C.accent, transition:"background 0.3s" }} />
+    <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:saving?C.sub:C.accent }}>
+      <div style={{ width:6, height:6, borderRadius:3, background:saving?C.sub:C.accent, transition:"background 0.3s" }} />
       {saving ? "儲存中" : "已儲存"}
     </div>
   );
 }
 
+// ── Year Goals ────────────────────────────────────────────
 function YearGoals({ data, setData, saving, year }) {
   const done = data.filter(g => g.done && g.text).length;
   const total = data.filter(g => g.text).length;
+
+  function toggle(i) {
+    const n = [...data];
+    const isDone = !n[i].done;
+    n[i] = { ...n[i], done: isDone, doneDate: isDone ? new Date().toLocaleDateString("zh-TW", { month:"numeric", day:"numeric" }) : "" };
+    setData(n);
+  }
+
   return (
     <div style={{ padding:"20px 20px 120px" }}>
       <div style={{ marginBottom:24 }}>
@@ -182,14 +196,19 @@ function YearGoals({ data, setData, saving, year }) {
       </div>
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {data.map((goal, i) => (
-          <div key={i} className="fade-up" style={{ display:"flex", alignItems:"center", gap:12, background:C.card, borderRadius:14, padding:"13px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", opacity:goal.done?0.45:1, animationDelay:`${i*25}ms` }}>
-            <button onClick={() => { const n=[...data]; n[i]={...n[i],done:!n[i].done}; setData(n); }}
-              style={{ width:22, height:22, borderRadius:11, border:`2px solid ${goal.done?C.accent:C.border}`, background:goal.done?C.accent:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, padding:0, transition:"all 0.2s" }}>
-              {goal.done && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7.5L10 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-            </button>
-            <input style={{ flex:1, border:"none", outline:"none", fontSize:15, background:"transparent", textDecoration:goal.done?"line-through":"none", color:goal.done?C.sub:C.text }}
-              placeholder={`目標 ${i+1}`} value={goal.text}
-              onChange={e => { const n=[...data]; n[i]={...n[i],text:e.target.value}; setData(n); }} />
+          <div key={i} className="fade-up" style={{ background:C.card, borderRadius:14, padding:"13px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", opacity:goal.done?0.5:1, animationDelay:`${i*25}ms` }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <button onClick={() => toggle(i)}
+                style={{ width:22, height:22, borderRadius:11, border:`2px solid ${goal.done?C.accent:C.border}`, background:goal.done?C.accent:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, padding:0, transition:"all 0.2s" }}>
+                {goal.done && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7.5L10 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </button>
+              <input style={{ flex:1, border:"none", outline:"none", fontSize:15, background:"transparent", textDecoration:goal.done?"line-through":"none", color:goal.done?C.sub:C.text }}
+                placeholder={`目標 ${i+1}`} value={goal.text}
+                onChange={e => { const n=[...data]; n[i]={...n[i],text:e.target.value}; setData(n); }} />
+            </div>
+            {goal.done && goal.doneDate && (
+              <div style={{ fontSize:11, color:C.accent, marginTop:6, marginLeft:34 }}>✓ 完成於 {goal.doneDate}</div>
+            )}
           </div>
         ))}
       </div>
@@ -197,19 +216,56 @@ function YearGoals({ data, setData, saving, year }) {
   );
 }
 
+// ── Month Planner ─────────────────────────────────────────
+function MoodPicker({ onSelect, onClose }) {
+  return (
+    <div className="pop-in" style={{ position:"absolute", background:C.card, borderRadius:14, padding:"10px 12px", boxShadow:"0 4px 20px rgba(0,0,0,0.15)", zIndex:50, display:"flex", gap:8, flexWrap:"wrap", width:200 }}>
+      {MOODS.map(m => (
+        <button key={m} onClick={() => onSelect(m)}
+          style={{ fontSize:22, background:"none", border:"none", cursor:"pointer", borderRadius:8, padding:4, lineHeight:1 }}>
+          {m}
+        </button>
+      ))}
+      <button onClick={onClose}
+        style={{ fontSize:11, color:C.sub, background:"none", border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 8px", cursor:"pointer", width:"100%", marginTop:2 }}>
+        取消
+      </button>
+    </div>
+  );
+}
+
 function MonthPlanner({ data, setData, saving, year }) {
   const [selected, setSelected] = useState(null);
+  const [moodPickerDay, setMoodPickerDay] = useState(null);
+  const pickerRef = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) setMoodPickerDay(null);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   if (selected !== null) {
     const m = selected, mData = data[m] || {}, mode = mData.mode || "plan", marked = mData.marked || {};
     const setMode = md => setData(p => ({...p, [m]: {...(p[m]||{}), mode:md}}));
     const updatePlan = t => setData(p => ({...p, [m]: {...(p[m]||{}), plan:t}}));
-    const toggleDay = d => setData(p => ({...p, [m]: {...(p[m]||{}), marked:{...marked,[d]:!marked[d]}}}));
+    const setMood = (day, mood) => {
+      setData(p => ({...p, [m]: {...(p[m]||{}), marked:{...marked, [day]: mood}}}));
+      setMoodPickerDay(null);
+    };
+    const clearMood = day => {
+      const newMarked = {...marked}; delete newMarked[day];
+      setData(p => ({...p, [m]: {...(p[m]||{}), marked:newMarked}}));
+      setMoodPickerDay(null);
+    };
 
     return (
       <div style={{ padding:"20px 20px 120px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
-          <button onClick={() => setSelected(null)} style={{ width:32, height:32, borderRadius:16, background:C.border, border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <button onClick={() => { setSelected(null); setMoodPickerDay(null); }}
+            style={{ width:32, height:32, borderRadius:16, background:C.border, border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
             <svg width="8" height="13" viewBox="0 0 8 13" fill="none"><path d="M7 1L1 6.5L7 12" stroke={C.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
           <div style={{ flex:1 }}>
@@ -220,28 +276,57 @@ function MonthPlanner({ data, setData, saving, year }) {
         </div>
         <div style={{ display:"flex", background:C.border, borderRadius:10, padding:3, marginBottom:20 }}>
           {[["plan","📋 計畫"],["calendar","📅 日曆"]].map(([k,l]) => (
-            <button key={k} onClick={() => setMode(k)} style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:mode===k?600:400, color:mode===k?C.text:C.sub, background:mode===k?C.card:"transparent", boxShadow:mode===k?"0 1px 3px rgba(0,0,0,0.08)":"none", transition:"all 0.2s" }}>{l}</button>
+            <button key={k} onClick={() => setMode(k)} style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:mode===k?600:400, color:mode===k?C.text:C.sub, background:mode===k?C.card:"transparent", transition:"all 0.2s" }}>{l}</button>
           ))}
         </div>
+
         {mode === "plan" ? (
           <div>
             <textarea style={{ width:"100%", minHeight:220, border:`1.5px solid ${C.border}`, borderRadius:14, padding:16, fontSize:15, lineHeight:1.7, color:C.text, background:C.card, resize:"none", outline:"none" }}
               placeholder={`記錄 ${MONTHS[m-1]} 的計畫…`} value={mData.plan||""} onChange={e => updatePlan(e.target.value)} />
-            {mData.plan && <button onClick={() => updatePlan("")} style={{ marginTop:10, background:"none", border:`1px solid ${C.red}`, color:C.red, borderRadius:8, padding:"7px 14px", cursor:"pointer", fontSize:13 }}>清除內容</button>}
+            {mData.plan && <button onClick={() => updatePlan("")} style={{ marginTop:10, background:"none", border:`1px solid ${C.red}`, color:C.red, borderRadius:8, padding:"7px 14px", cursor:"pointer", fontSize:13 }}>清除</button>}
           </div>
         ) : (
           <div style={{ background:C.card, borderRadius:16, padding:16, boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+            <div style={{ fontSize:11, color:C.sub, textAlign:"center", marginBottom:10 }}>點擊日期選擇心情</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:8 }}>
               {["日","一","二","三","四","五","六"].map(d => <div key={d} style={{ textAlign:"center", fontSize:11, color:C.sub, fontWeight:500, padding:"4px 0" }}>{d}</div>)}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
               {Array(FIRST_DAY(m,year)).fill(null).map((_,i) => <div key={"e"+i} />)}
               {Array(DAYS_IN_MONTH(m,year)).fill(null).map((_,i) => {
-                const day=i+1, isMarked=marked[day];
-                return <button key={day} onClick={() => toggleDay(day)} style={{ aspectRatio:"1", borderRadius:8, border:"none", background:isMarked?C.accent:C.bg, color:isMarked?"#fff":C.text, fontSize:13, cursor:"pointer", fontWeight:isMarked?600:400, transition:"all 0.15s" }}>{day}</button>;
+                const day = i+1;
+                const mood = marked[day];
+                const isPickerOpen = moodPickerDay === day;
+                return (
+                  <div key={day} style={{ position:"relative" }}>
+                    <button onClick={() => setMoodPickerDay(isPickerOpen ? null : day)}
+                      style={{ width:"100%", aspectRatio:"1", borderRadius:10, border:`1.5px solid ${mood ? C.accent+"40" : C.border}`, background:mood ? C.accentLight : C.bg, fontSize:12, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", position:"relative", transition:"all 0.15s" }}>
+                      <span style={{ fontSize:11, color:C.sub }}>{day}</span>
+                      {mood && <span style={{ fontSize:14, lineHeight:1 }}>{mood}</span>}
+                    </button>
+                    {isPickerOpen && (
+                      <div ref={pickerRef} style={{ position:"absolute", top:"100%", left:"50%", transform:"translateX(-50%)", zIndex:100, marginTop:4 }}>
+                        <div className="pop-in" style={{ background:C.card, borderRadius:14, padding:"10px 12px", boxShadow:"0 4px 20px rgba(0,0,0,0.15)", display:"flex", gap:6, flexWrap:"wrap", width:180 }}>
+                          {MOODS.map(mo => (
+                            <button key={mo} onClick={() => setMood(day, mo)}
+                              style={{ fontSize:20, background:"none", border:"none", cursor:"pointer", borderRadius:8, padding:3, lineHeight:1 }}>
+                              {mo}
+                            </button>
+                          ))}
+                          {mood && (
+                            <button onClick={() => clearMood(day)}
+                              style={{ fontSize:11, color:C.red, background:"none", border:`1px solid ${C.red}`, borderRadius:6, padding:"3px 8px", cursor:"pointer", width:"100%", marginTop:2 }}>
+                              清除
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
               })}
             </div>
-            <div style={{ textAlign:"center", fontSize:11, color:C.sub, marginTop:12 }}>點擊日期標記重要日子</div>
           </div>
         )}
       </div>
@@ -261,15 +346,15 @@ function MonthPlanner({ data, setData, saving, year }) {
         {MONTHS.map((label, i) => {
           const m=i+1, mData=data[m]||{};
           const hasPlan=mData.plan&&mData.plan.trim();
-          const markedCount=Object.values(mData.marked||{}).filter(Boolean).length;
+          const moodCount=Object.values(mData.marked||{}).filter(Boolean).length;
           const isCurrent=m===new Date().getMonth()+1&&year===new Date().getFullYear();
           return (
             <button key={m} onClick={() => setSelected(m)} style={{ background:isCurrent?C.accentLight:C.card, borderRadius:14, padding:"16px 12px 14px", display:"flex", flexDirection:"column", alignItems:"flex-start", gap:6, border:`1.5px solid ${isCurrent?C.accent+"50":C.border}`, cursor:"pointer", textAlign:"left", transition:"transform 0.15s" }}>
               <div style={{ fontSize:15, fontWeight:600, color:isCurrent?C.accent:C.text }}>{label}</div>
               <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
                 {hasPlan && <div style={{ fontSize:10, color:C.sub }}>📋 有計畫</div>}
-                {markedCount>0 && <div style={{ fontSize:10, color:C.sub }}>🔖 {markedCount} 個日期</div>}
-                {!hasPlan&&markedCount===0 && <div style={{ fontSize:10, color:C.border }}>— 空白</div>}
+                {moodCount>0 && <div style={{ fontSize:10, color:C.sub }}>😊 {moodCount} 天有心情</div>}
+                {!hasPlan&&moodCount===0 && <div style={{ fontSize:10, color:C.border }}>— 空白</div>}
               </div>
             </button>
           );
@@ -279,6 +364,7 @@ function MonthPlanner({ data, setData, saving, year }) {
   );
 }
 
+// ── Daily Note ────────────────────────────────────────────
 function DailyNote({ data, setData, saving }) {
   const today = new Date().toISOString().slice(0,10);
   const [date, setDate] = useState(today);
@@ -303,27 +389,27 @@ function DailyNote({ data, setData, saving }) {
   );
 }
 
+// ── Settings ──────────────────────────────────────────────
 function SettingsModal({ user, password, plannerName, setPlannerName, onClose, onLogout }) {
   const [name, setName] = useState(plannerName);
   const [nickname, setNickname] = useState("");
   const [msg, setMsg] = useState("");
   const [saving, setSaving] = useState(false);
 
-  async function savePlannerName() {
+  function savePlannerName() {
     const val = name.trim() || "計畫本";
     setPlannerName(val);
     localStorage.setItem("plannerName_"+user, val);
-    setMsg("計畫本名稱已儲存！");
-    setTimeout(() => setMsg(""), 2000);
+    setMsg("已儲存！"); setTimeout(() => setMsg(""), 2000);
   }
 
   async function saveNickname() {
     if (!nickname.trim()) return;
     setSaving(true);
-    const res = await updateDisplayName(user, password, nickname.trim());
+    const res = await apiCall({ action:"updateName", user, password, displayName:nickname.trim() });
     setSaving(false);
     if (res && res.ok) { setMsg("暱稱已更新！"); setTimeout(() => setMsg(""), 2000); }
-    else setMsg("更新失敗，請再試一次");
+    else setMsg("更新失敗");
   }
 
   return (
@@ -358,33 +444,46 @@ function SettingsModal({ user, password, plannerName, setPlannerName, onClose, o
   );
 }
 
+// ── Main App ──────────────────────────────────────────────
 const TABS = [
   { id:"goals", label:"年度目標", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6"/><circle cx="10" cy="10" r="4" stroke="currentColor" strokeWidth="1.6"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/></svg> },
-  { id:"month",  label:"月份計畫", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="M7 2v4M13 2v4M3 9h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg> },
-  { id:"daily",  label:"當日記錄", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg> },
+  { id:"month", label:"月份計畫", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="M7 2v4M13 2v4M3 9h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg> },
+  { id:"daily", label:"當日記錄", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg> },
 ];
 
-function MainApp({ user, password, displayName: initDisplayName }) {
+function MainApp({ user, password, displayName:initName }) {
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
   const [tab, setTab] = useState(0);
-  const [goals, setGoalsState] = useState(Array(10).fill(null).map(() => ({text:"", done:false})));
+  const [goals, setGoalsState] = useState(Array(10).fill(null).map(() => ({text:"", done:false, doneDate:""})));
   const [monthData, setMonthState] = useState({});
   const [dailyData, setDailyState] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState({ goals:false, month:false, daily:false });
   const [showSettings, setShowSettings] = useState(false);
   const [plannerName, setPlannerName] = useState(localStorage.getItem("plannerName_"+user) || "計畫本");
-  const [displayName, setDisplayName] = useState(initDisplayName);
   const timers = { goals:useRef(null), month:useRef(null), daily:useRef(null) };
   const touchStart = useRef(null);
 
   useEffect(() => {
     async function load() {
-      const [g,m,d] = await Promise.all([readSheet(user,"goals"), readSheet(user,"month"), readSheet(user,"daily")]);
-      if (g&&g.length) setGoalsState(g.map(r => ({ text:r[0]||"", done:r[1]==="true" })));
-      if (m&&m.length) { const o={}; m.forEach(r => { try { o[r[0]]=JSON.parse(r[1]); } catch {} }); setMonthState(o); }
-      if (d&&d.length) { const o={}; d.forEach(r => { if(r[0]) o[r[0]]=r[1]||""; }); setDailyState(o); }
+      setLoading(true);
+      const [g,m,d] = await Promise.all([
+        readSheet(user, "goals"),
+        readSheet(user, "month"),
+        readSheet(user, "daily"),
+      ]);
+      if (g && g.length) setGoalsState(g.map(r => ({ text:r[0]||"", done:r[1]==="true", doneDate:r[2]||"" })));
+      if (m && m.length) {
+        const o = {};
+        m.forEach(r => { try { if(r[0]) o[r[0]] = JSON.parse(r[1]); } catch {} });
+        setMonthState(o);
+      }
+      if (d && d.length) {
+        const o = {};
+        d.forEach(r => { if(r[0]) o[r[0]] = r[1]||""; });
+        setDailyState(o);
+      }
       setLoading(false);
     }
     load();
@@ -402,13 +501,16 @@ function MainApp({ user, password, displayName: initDisplayName }) {
     };
   }
 
-  const setGoals = autoSave("goals", setGoalsState, val => writeSheet(user,"goals",val.map(g=>[g.text,String(g.done)])));
-  const setMonthData = autoSave("month", setMonthState, val => writeSheet(user,"month",Object.entries(val).map(([k,v])=>[k,JSON.stringify(v)])));
-  const setDailyData = autoSave("daily", setDailyState, val => writeSheet(user,"daily",Object.entries(val).map(([k,v])=>[k,v])));
+  const setGoals = autoSave("goals", setGoalsState, val =>
+    writeSheet(user, "goals", val.map(g => [g.text, String(g.done), g.doneDate||""])));
+  const setMonthData = autoSave("month", setMonthState, val =>
+    writeSheet(user, "month", Object.entries(val).map(([k,v]) => [k, JSON.stringify(v)])));
+  const setDailyData = autoSave("daily", setDailyState, val =>
+    writeSheet(user, "daily", Object.entries(val).filter(([,v]) => v).map(([k,v]) => [k, v])));
 
   const handleTouchStart = e => { touchStart.current = e.touches[0].clientX; };
   const handleTouchEnd = e => {
-    if (touchStart.current === null) return;
+    if (!touchStart.current) return;
     const diff = touchStart.current - e.changedTouches[0].clientX;
     if (Math.abs(diff) > 50) {
       if (diff > 0 && tab < 2) setTab(t => t+1);
@@ -427,7 +529,7 @@ function MainApp({ user, password, displayName: initDisplayName }) {
   if (loading) return (
     <div style={{ height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16, background:C.bg }}>
       <div style={{ width:36, height:36, borderRadius:18, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
-      <div style={{ color:C.sub, fontSize:14 }}>載入 {displayName} 的資料…</div>
+      <div style={{ color:C.sub, fontSize:14 }}>載入 {initName} 的資料…</div>
     </div>
   );
 
@@ -437,7 +539,7 @@ function MainApp({ user, password, displayName: initDisplayName }) {
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <button onClick={() => setShowSettings(true)} style={{ background:"none", border:"none", cursor:"pointer", textAlign:"left", padding:0 }}>
             <div style={{ fontSize:20, fontFamily:"'Noto Serif TC', serif", fontWeight:700, color:C.text }}>{plannerName}</div>
-            <div style={{ fontSize:12, color:C.sub, marginTop:2 }}>{displayName} ✎</div>
+            <div style={{ fontSize:12, color:C.sub, marginTop:2 }}>{initName} ✎</div>
           </button>
           <select value={year} onChange={e => setYear(Number(e.target.value))}
             style={{ border:`1.5px solid ${C.border}`, borderRadius:10, padding:"6px 10px", fontSize:14, color:C.text, background:C.card, outline:"none", cursor:"pointer" }}>
@@ -472,17 +574,16 @@ function MainApp({ user, password, displayName: initDisplayName }) {
   );
 }
 
+// ── Root ──────────────────────────────────────────────────
 function Root() {
   const [session, setSession] = useState(() => {
     try { return JSON.parse(localStorage.getItem("session")); } catch { return null; }
   });
-
   function handleLogin(user, password, displayName) {
     const s = { user, password, displayName };
     localStorage.setItem("session", JSON.stringify(s));
     setSession(s);
   }
-
   if (!session) return <CoverPage onLogin={handleLogin} />;
   return <MainApp user={session.user} password={session.password} displayName={session.displayName} />;
 }
