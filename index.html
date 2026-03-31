@@ -536,6 +536,7 @@ function DailyNote({ user, saving, setSaving }) {
   }
 
   const dateLabel = new Date(date+"T00:00:00").toLocaleDateString("zh-TW",{month:"long",day:"numeric",weekday:"long"});
+  const cacheStatus = cacheHas(user,"daily",date) ? `快取:${JSON.stringify(cacheGet(user,"daily",date)).slice(0,30)}` : "無快取";
 
   return (
     <div style={{ padding:"20px 20px 120px" }}>
@@ -545,6 +546,13 @@ function DailyNote({ user, saving, setSaving }) {
           <div style={{ fontSize:16, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text, flex:1, minWidth:0 }}>{dateLabel}</div>
           <SaveDot saving={saving} />
         </div>
+      </div>
+      {/* DEBUG - 看完再移除 */}
+      <div style={{ background:"#fffbe6", border:"1px solid #ffe58f", borderRadius:8, padding:"8px 12px", fontSize:11, color:"#333", marginBottom:8, wordBreak:"break-all" }}>
+        <div>date key: <b>{date}</b></div>
+        <div>note state: <b>{JSON.stringify(note).slice(0,50)}</b></div>
+        <div>noteCache keys: <b>{Object.keys(noteCache).join(", ")}</b></div>
+        <div>{cacheStatus}</div>
       </div>
       <input type="date" value={date} onChange={e=>setDate(toDateKey(e.target.value))}
         style={{ width:"100%", maxWidth:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"11px 14px", fontSize:14, color:C.text, background:C.card, outline:"none", marginBottom:16, display:"block", WebkitAppearance:"none", appearance:"none" }} />
