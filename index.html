@@ -353,7 +353,11 @@ function MonthPlanner({ user, saving, setSaving, year }) {
 
   function openMonth(m) {
     setSelected(m);
-    loadMonth(m);
+    // 只有在 monthCache 裡沒有這個月的資料才去載入
+    const key = getKey(m);
+    if (monthCache[key] === undefined) {
+      loadMonth(m);
+    }
   }
 
   function saveMonth(m, data) {
@@ -474,7 +478,13 @@ function MonthPlanner({ user, saving, setSaving, year }) {
 // ── Daily Note ─────────────────────────────────────────────
 // Sheet key: "daily"  Row key: "YYYY-MM-DD"  Value: plain text
 function DailyNote({ user, saving, setSaving }) {
-  const today = new Date().toISOString().slice(0,10);
+  function toDateKey(d) {
+    // 確保格式統一為 YYYY-MM-DD（補零）
+    if (!d) return "";
+    const [y,m,day] = d.split(/[-\/]/);
+    return `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+  const today = toDateKey(new Date().toISOString().slice(0,10));
   const [date, setDate] = useState(today);
   // 初始化時就把全域 CACHE 裡已有的今天資料同步進來
   const [noteCache, setNoteCache] = useState(() => {
@@ -528,7 +538,7 @@ function DailyNote({ user, saving, setSaving }) {
           <SaveDot saving={saving} />
         </div>
       </div>
-      <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+      <input type="date" value={date} onChange={e=>setDate(toDateKey(e.target.value))}
         style={{ width:"100%", maxWidth:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"11px 14px", fontSize:14, color:C.text, background:C.card, outline:"none", marginBottom:16, display:"block", WebkitAppearance:"none", appearance:"none" }} />
       {note === null ? (
         <div style={{ padding:20, display:"flex", justifyContent:"center" }}>
@@ -616,10 +626,10 @@ function MainApp({ user, password, displayName:initName }) {
 
   // 進入 App 時預載入當年目標 + 當日記錄，同時存進快取
   useEffect(()=>{
-    const today = new Date().toISOString().slice(0,10);
+    const todayKey = new Date().toISOString().slice(0,10);
     Promise.all([
       cachedReadOne(user, "goals", String(thisYear)),
-      cachedReadOne(user, "daily", today),
+      cachedReadOne(user, "daily", todayKey),
     ]).then(()=>setAppLoading(false));
   },[]);
 
