@@ -90,9 +90,17 @@ function cacheHas(user, sheet, key) {
 async function cachedReadOne(user, sheet, key) {
   if (cacheHas(user, sheet, key)) return cacheGet(user, sheet, key);
   const raw = await apiCall({ action:"readOne", user, sheet, key:String(key) });
-  // apiCall 已經做過 JSON.parse，raw 可能是字串、null、或物件
-  // 統一轉成字串存快取
-  const val = (raw === null || raw === undefined) ? "" : String(raw);
+  // raw 可能是 null、字串、或物件（month/goals 是 JSON）
+  // 統一轉成字串存快取，注意 Apps Script ok() 會對字串雙重編碼
+  let val = "";
+  if (raw === null || raw === undefined) {
+    val = "";
+  } else if (typeof raw === "string") {
+    val = raw;
+  } else {
+    // 物件或陣列（month/goals）直接 JSON.stringify 存
+    val = JSON.stringify(raw);
+  }
   cacheSet(user, sheet, key, val);
   return val;
 }
@@ -536,8 +544,6 @@ function DailyNote({ user, saving, setSaving }) {
   }
 
   const dateLabel = new Date(date+"T00:00:00").toLocaleDateString("zh-TW",{month:"long",day:"numeric",weekday:"long"});
-  const cacheStatus = cacheHas(user,"daily",date) ? `快取:${JSON.stringify(cacheGet(user,"daily",date)).slice(0,30)}` : "無快取";
-
   return (
     <div style={{ padding:"20px 20px 120px" }}>
       <div style={{ marginBottom:16 }}>
@@ -547,13 +553,7 @@ function DailyNote({ user, saving, setSaving }) {
           <SaveDot saving={saving} />
         </div>
       </div>
-      {/* DEBUG - 看完再移除 */}
-      <div style={{ background:"#fffbe6", border:"1px solid #ffe58f", borderRadius:8, padding:"8px 12px", fontSize:11, color:"#333", marginBottom:8, wordBreak:"break-all" }}>
-        <div>date key: <b>{date}</b></div>
-        <div>note state: <b>{JSON.stringify(note).slice(0,50)}</b></div>
-        <div>noteCache keys: <b>{Object.keys(noteCache).join(", ")}</b></div>
-        <div>{cacheStatus}</div>
-      </div>
+
       <input type="date" value={date} onChange={e=>setDate(toDateKey(e.target.value))}
         style={{ width:"100%", maxWidth:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"11px 14px", fontSize:14, color:C.text, background:C.card, outline:"none", marginBottom:16, display:"block", WebkitAppearance:"none", appearance:"none" }} />
       {note === null ? (
