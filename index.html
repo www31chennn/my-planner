@@ -34,7 +34,15 @@
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-const API = "https://script.google.com/macros/s/AKfycbw5WUcyCgC0ELH15FBjho-R1w5P5kopQOh0HqSGmksG3e4WrQyd_JL-YmQfbJVqMay2/exec";
+const API = "/.netlify/functions/api";
+
+// 密碼加密：用 SHA-256 hash，存的是 hash 值而非明文
+async function hashPassword(password) {
+  const msgBuffer = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
+}
 
 // 所有 API 呼叫用 POST + JSON body
 async function apiPost(payload) {
@@ -111,24 +119,25 @@ function CoverPage({ onLogin }) {
   async function handleEnter() {
     if (!username.trim()||!password.trim()) { setError("請填寫帳號和密碼"); return; }
     setLoading(true); setError("");
-    const res = await apiPost({ action:"auth", user:username.trim(), password:password.trim(), displayName:"__check__" });
+    const hashed = await hashPassword(password.trim());
+    const res = await apiPost({ action:"auth", user:username.trim(), password:hashed, displayName:"__check__" });
     setLoading(false);
     if (!res) { setError("連線失敗，請稍後再試"); return; }
     if (res.isNew) {
-      setPendingCreds({user:username.trim(), password:password.trim()});
+      setPendingCreds({user:username.trim(), hashedPassword:hashed});
       setDisplayName(username.trim());
       setStep("nickname");
     } else if (res.ok===false) {
       setError(res.error||"密碼錯誤");
     } else {
-      onLogin(username.trim(), password.trim(), res.displayName||username.trim());
+      onLogin(username.trim(), hashed, res.displayName||username.trim());
     }
   }
 
   async function handleSetNickname() {
     if (!displayName.trim()) { setError("請輸入暱稱"); return; }
     setLoading(true); setError("");
-    const res = await apiPost({ action:"updateName", user:pendingCreds.user, password:pendingCreds.password, displayName:displayName.trim() });
+    const res = await apiPost({ action:"updateName", user:pendingCreds.user, password:pendingCreds.hashedPassword, displayName:displayName.trim() });
     setLoading(false);
     if (res&&res.ok) { onLogin(pendingCreds.user, pendingCreds.password, displayName.trim()); }
     else { setError("建立失敗，請稍後再試"); }
@@ -242,40 +251,43 @@ function YearGoals({ goals, setGoals, saving, year }) {
 
 // ── Month Planner ──────────────────────────────────────────
 function MoodPicker({ day, currentMood, onSelect, onClear, onClose }) {
-  const ref = useRef(null);
   const [custom, setCustom] = useState("");
+  // Render as overlay at document body level using a portal div
   useEffect(()=>{
-    function handle(e) { if(ref.current&&!ref.current.contains(e.target)) onClose(); }
-    setTimeout(()=>document.addEventListener("mousedown",handle),0);
+    function handle(e) {
+      // Close if clicking the backdrop
+      if (e.target.id === "mood-backdrop") onClose();
+    }
+    document.addEventListener("mousedown",handle);
     return ()=>document.removeEventListener("mousedown",handle);
   },[]);
-  return (
-    <div ref={ref} className="pop-in" style={{ position:"absolute", top:"110%", left:"50%", transform:"translateX(-50%)", background:C.card, borderRadius:16, padding:12, boxShadow:"0 8px 30px rgba(0,0,0,0.15)", zIndex:200, width:196 }}>
-      <div style={{ fontSize:11, color:C.sub, marginBottom:8, textAlign:"center" }}>{day} 日的心情</div>
-      <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginBottom:10 }}>
-        {DEFAULT_MOODS.map(m=>(
-          <button key={m} onClick={()=>onSelect(m)} style={{ fontSize:21, background:currentMood===m?C.accentLight:"none", border:currentMood===m?`1.5px solid ${C.accent}`:"1.5px solid transparent", borderRadius:8, padding:3, cursor:"pointer" }}>{m}</button>
-        ))}
+
+  return ReactDOM.createPortal(
+    <div id="mood-backdrop" style={{ position:"fixed", inset:0, zIndex:999, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,0.15)" }}>
+      <div className="pop-in" style={{ background:C.card, borderRadius:16, padding:16, boxShadow:"0 8px 40px rgba(0,0,0,0.2)", width:220, margin:20 }}>
+        <div style={{ fontSize:11, color:C.sub, marginBottom:8, textAlign:"center" }}>{day} 日的心情</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginBottom:10 }}>
+          {DEFAULT_MOODS.map(m=>(
+            <button key={m} onClick={()=>onSelect(m)} style={{ fontSize:21, background:currentMood===m?C.accentLight:"none", border:currentMood===m?`1.5px solid ${C.accent}`:"1.5px solid transparent", borderRadius:8, padding:3, cursor:"pointer" }}>{m}</button>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:6, marginBottom:currentMood?8:0 }}>
+          <input value={custom} onChange={e=>setCustom(e.target.value)} placeholder="自訂符號…" maxLength={2}
+            style={{ flex:1, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:14, outline:"none", color:C.text, background:C.bg, minWidth:0 }} />
+          <button onClick={()=>{if(custom.trim()){onSelect(custom.trim());setCustom("");}}}
+            style={{ background:C.accent, color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:13, fontWeight:600, flexShrink:0 }}>選</button>
+        </div>
+        {currentMood && <button onClick={onClear} style={{ width:"100%", fontSize:12, color:C.red, background:"none", border:`1px solid ${C.red}`, borderRadius:8, padding:"5px 0", cursor:"pointer" }}>清除心情</button>}
       </div>
-      <div style={{ display:"flex", gap:6, marginBottom:currentMood?8:0 }}>
-        <input value={custom} onChange={e=>setCustom(e.target.value)} placeholder="自訂符號…" maxLength={2}
-          style={{ flex:1, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:14, outline:"none", color:C.text, background:C.bg, minWidth:0 }} />
-        <button onClick={()=>{if(custom.trim()){onSelect(custom.trim());setCustom("");}}}
-          style={{ background:C.accent, color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:13, fontWeight:600, flexShrink:0 }}>選</button>
-      </div>
-      {currentMood && <button onClick={onClear} style={{ width:"100%", fontSize:12, color:C.red, background:"none", border:`1px solid ${C.red}`, borderRadius:8, padding:"5px 0", cursor:"pointer" }}>清除心情</button>}
-    </div>
+    </div>,
+    document.body
   );
 }
 
-function MonthPlanner({ monthData, setMonthData, saving, year }) {
+function MonthPlanner({ monthData, updateMonth, saving, year }) {
   const [selected, setSelected] = useState(null);
   const [moodPickerDay, setMoodPickerDay] = useState(null);
   const yearData = monthData[year] || {};
-
-  function updateMonth(m, val) {
-    setMonthData(p => ({ ...p, [year]: { ...(p[year]||{}), [m]: val } }));
-  }
 
   if (selected!==null) {
     const m=selected, mData=yearData[m]||{}, mode=mData.mode||"plan", marked=mData.marked||{};
@@ -315,7 +327,7 @@ function MonthPlanner({ monthData, setMonthData, saving, year }) {
                 const setMood=(mo)=>{updateMonth(m,{...mData,marked:{...marked,[day]:mo}});setMoodPickerDay(null);};
                 const clearMood=()=>{const nm={...marked};delete nm[day];updateMonth(m,{...mData,marked:nm});setMoodPickerDay(null);};
                 return (
-                  <div key={day} style={{ position:"relative" }}>
+                  <div key={day}>
                     <button onClick={()=>setMoodPickerDay(isOpen?null:day)}
                       style={{ width:"100%", aspectRatio:"1", borderRadius:10, border:`1.5px solid ${mood?C.accent+"40":C.border}`, background:mood?C.accentLight:C.bg, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1, padding:2, transition:"all 0.15s" }}>
                       <span style={{ color:C.sub, fontSize:10 }}>{day}</span>
@@ -377,7 +389,7 @@ function DailyNote({ dailyData, setDailyData, saving }) {
         </div>
       </div>
       <input type="date" value={date} onChange={e=>setDate(e.target.value)}
-        style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"11px 14px", fontSize:15, color:C.text, background:C.card, outline:"none", marginBottom:16, display:"block" }} />
+        style={{ width:"100%", maxWidth:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"11px 14px", fontSize:14, color:C.text, background:C.card, outline:"none", marginBottom:16, display:"block", WebkitAppearance:"none", appearance:"none" }} />
       {!note&&<div style={{ textAlign:"center", padding:"20px 0 12px", color:C.sub, fontSize:14 }}>這天還沒有記錄</div>}
       <textarea style={{ width:"100%", minHeight:260, border:`1.5px solid ${C.border}`, borderRadius:14, padding:16, fontSize:15, lineHeight:1.8, color:C.text, background:C.card, resize:"none", outline:"none", display:"block" }}
         value={note} onChange={e=>setDailyData(p=>({...p,[date]:e.target.value}))} placeholder="今天發生了什麼事…" />
@@ -498,6 +510,14 @@ function MainApp({ user, password, displayName:initName }) {
   const setMonthData = makeSet("month", setMonthState, latestMonth, "month");
   const setDailyData = makeSet("daily", setDailyState, latestDaily, "daily");
 
+  function updateMonth(year, m, val) {
+    const prev = latestMonth.current;
+    const yearObj = prev[year] ? { ...prev[year] } : {};
+    yearObj[m] = val;
+    const next = { ...prev, [year]: yearObj };
+    setMonthData(next);
+  }
+
   const handleTouchStart=e=>{touchStart.current=e.touches[0].clientX;};
   const handleTouchEnd=e=>{
     if(!touchStart.current) return;
@@ -532,7 +552,7 @@ function MainApp({ user, password, displayName:initName }) {
       <div style={{ flex:1, overflow:"hidden" }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         <div className="swipe-container" style={{ transform:`translateX(${-tab*33.333}%)` }}>
           <div className="swipe-panel"><YearGoals goals={goals} setGoals={setGoals} saving={saving.goals} year={year} /></div>
-          <div className="swipe-panel"><MonthPlanner monthData={monthData} setMonthData={setMonthData} saving={saving.month} year={year} /></div>
+          <div className="swipe-panel"><MonthPlanner monthData={monthData} updateMonth={(m,v)=>updateMonth(year,m,v)} saving={saving.month} year={year} /></div>
           <div className="swipe-panel"><DailyNote dailyData={dailyData} setDailyData={setDailyData} saving={saving.daily} /></div>
         </div>
       </div>
