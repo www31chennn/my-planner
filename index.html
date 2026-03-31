@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="我的計畫本" />
+  <title>我的計畫本</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { background: #1A1A2E; overscroll-behavior: none; }
+    input, textarea, button { font-family: inherit; }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef } = React;
+
+const MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+const DAYS_IN_MONTH = (m, y=2025) => new Date(y, m, 0).getDate();
+const FIRST_DAY = (m, y=2025) => new Date(y, m-1, 1).getDay();
+
+function YearGoals({ data, setData }) {
+  return (
+    <div style={s.page}>
+      <div style={s.pageHeader}>
+        <div style={s.pageEmoji}>🎯</div>
+        <div style={s.pageTitle}>2025 年度目標</div>
+        <div style={s.pageSubtitle}>{data.filter(g=>g.done).length} / {data.filter(g=>g.text).length} 完成</div>
+      </div>
+      <div style={s.goalList}>
+        {data.map((goal, i) => (
+          <div key={i} style={{...s.goalRow, opacity: goal.done ? 0.5 : 1}}>
+            <button
+              style={{...s.checkbox, ...(goal.done ? s.checkboxDone : {})}}
+              onClick={() => {
+                const next = [...data];
+                next[i] = {...next[i], done: !next[i].done};
+                setData(next);
+              }}
+            >
+              {goal.done && <span style={{color:"#fff", fontSize:13}}>✓</span>}
+            </button>
+            <input
+              style={{...s.goalInput, textDecoration: goal.done ? "line-through" : "none"}}
+              placeholder={`目標 ${i+1}`}
+              value={goal.text}
+              onChange={e => {
+                const next = [...data];
+                next[i] = {...next[i], text: e.target.value};
+                setData(next);
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MonthPlanner({ data, setData }) {
+  const [selected, setSelected] = useState(null);
+
+  function openMonth(m) {
+    setSelected({ month: m, mode: data[m]?.mode || "plan" });
+  }
+
+  function setMode(mode) {
+    setSelected(prev => ({...prev, mode}));
+    setData(prev => ({...prev, [selected.month]: {...(prev[selected.month]||{}), mode}}));
+  }
+
+  function updatePlan(text) {
+    setData(prev => ({...prev, [selected.month]: {...(prev[selected.month]||{}), plan: text}}));
+  }
+
+  function toggleDay(day) {
+    const m = selected.month;
+    const marked = data[m]?.marked || {};
+    setData(prev => ({...prev, [m]: {...(prev[m]||{}), marked: {...marked, [day]: !marked[day]}}}));
+  }
+
+  if (selected) {
+    const m = selected.month;
+    const mData = data[m] || {};
+    const daysCount = DAYS_IN_MONTH(m);
+    const firstDay = FIRST_DAY(m);
+    const marked = mData.marked || {};
+
+    return (
+      <div style={s.page}>
+        <div style={{display:"flex", alignItems:"center", gap:12, marginBottom:20}}>
+          <button style={s.backBtn} onClick={() => setSelected(null)}>‹</button>
+          <div style={s.pageTitle}>{MONTHS[m-1]}</div>
+        </div>
+        <div style={s.modeSwitch}>
+          <button style={{...s.modeBtn, ...(selected.mode==="plan" ? s.modeBtnActive : {})}} onClick={() => setMode("plan")}>📋 計畫</button>
+          <button style={{...s.modeBtn, ...(selected.mode==="calendar" ? s.modeBtnActive : {})}} onClick={() => setMode("calendar")}>📅 日曆</button>
+        </div>
+        {selected.mode === "plan" ? (
+          <div style={{flex:1, display:"flex", flexDirection:"column", gap:12}}>
+            <textarea
+              style={s.planTextarea}
+              placeholder={`記錄 ${MONTHS[m-1]} 的計畫…`}
+              value={mData.plan || ""}
+              onChange={e => updatePlan(e.target.value)}
+            />
+            {mData.plan && (
+              <button style={s.clearBtn} onClick={() => updatePlan("")}>清除內容</button>
+            )}
+          </div>
+        ) : (
+          <div>
+            <div style={s.calWeekRow}>
+              {["日","一","二","三","四","五","六"].map(d => (
+                <div key={d} style={s.calWeekLabel}>{d}</div>
+              ))}
+            </div>
+            <div style={s.calGrid}>
+              {Array(firstDay).fill(null).map((_,i) => <div key={"e"+i} />)}
+              {Array(daysCount).fill(null).map((_,i) => {
+                const day = i+1;
+                const isMarked = marked[day];
+                return (
+                  <button
+                    key={day}
+                    style={{...s.calDay, ...(isMarked ? s.calDayMarked : {})}}
+                    onClick={() => toggleDay(day)}
+                  >{day}</button>
+                );
+              })}
+            </div>
+            <div style={s.calHint}>點擊日期標記重要日子</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={s.page}>
+      <div style={s.pageHeader}>
+        <div style={s.pageEmoji}>🗓</div>
+        <div style={s.pageTitle}>月份計畫</div>
+        <div style={s.pageSubtitle}>點擊月份查看詳情</div>
+      </div>
+      <div style={s.monthGrid}>
+        {MONTHS.map((label, i) => {
+          const m = i+1;
+          const mData = data[m] || {};
+          const hasPlan = mData.plan && mData.plan.trim();
+          const markedCount = Object.values(mData.marked || {}).filter(Boolean).length;
+          return (
+            <button key={m} style={s.monthCard} onClick={() => openMonth(m)}>
+              <div style={s.monthNum}>{label}</div>
+              {hasPlan && <div style={s.monthDot}>📋</div>}
+              {markedCount > 0 && <div style={s.monthDot}>🔖 {markedCount}</div>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DailyNote({ data, setData }) {
+  const today = new Date().toISOString().slice(0,10);
+  const [date, setDate] = useState(today);
+  const note = data[date] || "";
+
+  function updateNote(text) {
+    setData(prev => ({...prev, [date]: text}));
+  }
+
+  return (
+    <div style={s.page}>
+      <div style={s.pageHeader}>
+        <div style={s.pageEmoji}>📆</div>
+        <div style={s.pageTitle}>當日記錄</div>
+      </div>
+      <input
+        type="date"
+        style={s.datePicker}
+        value={date}
+        onChange={e => setDate(e.target.value)}
+      />
+      <div style={{flex:1, display:"flex", flexDirection:"column", gap:12}}>
+        {!note && <div style={s.emptyDay}>這天還沒有記錄</div>}
+        <textarea
+          style={s.planTextarea}
+          value={note}
+          onChange={e => updateNote(e.target.value)}
+          placeholder="開始記錄今天的事…"
+        />
+        {note && <button style={s.clearBtn} onClick={() => updateNote("")}>清除</button>}
+      </div>
+    </div>
+  );
+}
+
+const TABS = [
+  { id: "goals", label: "年度目標", emoji: "🎯" },
+  { id: "month", label: "月份計畫", emoji: "🗓" },
+  { id: "daily", label: "當日記錄", emoji: "📆" },
+];
+
+const CARD_COLORS = { goals: "#FFF9F0", month: "#F0F5FF", daily: "#F0FFF5" };
+
+function App() {
+  const [goals, setGoals] = useState(Array(10).fill(null).map(() => ({text:"", done:false})));
+  const [monthData, setMonthData] = useState({});
+  const [dailyData, setDailyData] = useState({});
+  const [activeTab, setActiveTab] = useState("goals");
+  const [expanded, setExpanded] = useState(true);
+  const [stackOrder, setStackOrder] = useState(["goals", "month", "daily"]);
+
+  function bringToFront(id) {
+    setStackOrder(prev => [...prev.filter(t => t !== id), id]);
+    setActiveTab(id);
+    setExpanded(true);
+  }
+
+  function getCardStyle(id) {
+    const idx = stackOrder.indexOf(id);
+    const total = stackOrder.length;
+    const isFront = idx === total - 1;
+
+    if (expanded && isFront) {
+      return { position:"absolute", top:0, left:0, right:0, bottom:0, borderRadius:20, zIndex:idx+10, transform:"translateY(0)", transition:"transform 0.45s cubic-bezier(0.4,0,0.2,1)" };
+    }
+    if (expanded && !isFront) {
+      const behind = (total - 1 - idx);
+      return { position:"absolute", top:0, left:0, right:0, bottom:0, borderRadius:20, zIndex:idx+10, transform:`translateY(${behind * -14}px) scale(${1 - behind*0.04})`, transition:"transform 0.45s cubic-bezier(0.4,0,0.2,1)", pointerEvents:"none", filter:`brightness(${0.85+idx*0.05})` };
+    }
+    const fromBottom = (total - 1 - idx) * 60;
+    return { position:"absolute", top:0, left:0, right:0, bottom:0, borderRadius:20, zIndex:idx+10, transform:`translateY(${540 - fromBottom}px)`, transition:"transform 0.45s cubic-bezier(0.4,0,0.2,1)", filter:`brightness(${0.82+idx*0.06})`, cursor:"pointer" };
+  }
+
+  return (
+    <div style={s.app}>
+      <div style={s.bg}>
+        <div style={s.bgTitle}>我的計畫本</div>
+        <div style={s.bgSub}>2025</div>
+      </div>
+
+      <div style={s.stack}>
+        {stackOrder.map((id) => {
+          const tab = TABS.find(t => t.id === id);
+          const isFront = stackOrder[stackOrder.length - 1] === id;
+          return (
+            <div key={id} style={{...s.card, background: CARD_COLORS[id], ...getCardStyle(id)}}
+              onClick={!expanded ? () => bringToFront(id) : undefined}>
+              <div style={s.cardHeader} onClick={expanded ? () => setExpanded(false) : () => bringToFront(id)}>
+                <div style={s.cardHandle} />
+                <div style={s.cardHeaderRow}>
+                  <span style={s.cardEmoji}>{tab.emoji}</span>
+                  <span style={s.cardLabel}>{tab.label}</span>
+                  {expanded && isFront && <span style={s.collapseHint}>往下收起</span>}
+                </div>
+              </div>
+              <div style={s.cardContent}>
+                {id === "goals" && <YearGoals data={goals} setData={setGoals} />}
+                {id === "month" && <MonthPlanner data={monthData} setData={setMonthData} />}
+                {id === "daily" && <DailyNote data={dailyData} setData={setDailyData} />}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {!expanded && (
+        <>
+          <div style={s.bottomTabs}>
+            {TABS.map(tab => (
+              <button key={tab.id} style={s.bottomTab} onClick={() => bringToFront(tab.id)}>
+                <span style={{fontSize:20}}>{tab.emoji}</span>
+                <span style={s.bottomTabLabel}>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+          <div style={s.expandHint} onClick={() => setExpanded(true)}>往上展開 ↑</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const s = {
+  app: { fontFamily:"'Helvetica Neue',-apple-system,sans-serif", background:"#1A1A2E", minHeight:"100vh", maxWidth:430, margin:"0 auto", position:"relative", overflow:"hidden" },
+  bg: { position:"absolute", top:0, left:0, right:0, padding:"52px 28px 0" },
+  bgTitle: { color:"#fff", fontSize:32, fontWeight:700, letterSpacing:-0.5 },
+  bgSub: { color:"rgba(255,255,255,0.4)", fontSize:18, marginTop:4 },
+  stack: { position:"absolute", top:120, left:0, right:0, bottom:0 },
+  card: { boxShadow:"0 -4px 40px rgba(0,0,0,0.18)", display:"flex", flexDirection:"column", overflow:"hidden" },
+  cardHeader: { padding:"10px 20px 8px", cursor:"pointer", flexShrink:0 },
+  cardHandle: { width:36, height:4, background:"rgba(0,0,0,0.12)", borderRadius:2, margin:"0 auto 10px" },
+  cardHeaderRow: { display:"flex", alignItems:"center", gap:8 },
+  cardEmoji: { fontSize:20 },
+  cardLabel: { fontSize:17, fontWeight:600, color:"#1C1C1E", flex:1 },
+  collapseHint: { fontSize:12, color:"#8E8E93" },
+  cardContent: { flex:1, overflowY:"auto", padding:"0 0 40px" },
+  page: { padding:"4px 20px 20px", display:"flex", flexDirection:"column", gap:16 },
+  pageHeader: { display:"flex", alignItems:"center", gap:10, marginBottom:4 },
+  pageEmoji: { fontSize:24 },
+  pageTitle: { fontSize:20, fontWeight:700, color:"#1C1C1E" },
+  pageSubtitle: { fontSize:13, color:"#8E8E93", marginLeft:"auto" },
+  goalList: { display:"flex", flexDirection:"column", gap:10 },
+  goalRow: { display:"flex", alignItems:"center", gap:12, background:"#fff", borderRadius:12, padding:"12px 14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" },
+  checkbox: { width:24, height:24, borderRadius:12, border:"2px solid #D1D1D6", background:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, padding:0 },
+  checkboxDone: { background:"#34C759", border:"2px solid #34C759" },
+  goalInput: { flex:1, border:"none", outline:"none", fontSize:15, color:"#1C1C1E", background:"transparent" },
+  monthGrid: { display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:10 },
+  monthCard: { background:"#fff", borderRadius:14, padding:"16px 12px", display:"flex", flexDirection:"column", alignItems:"center", gap:4, border:"none", cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" },
+  monthNum: { fontSize:16, fontWeight:600, color:"#1C1C1E" },
+  monthDot: { fontSize:11, color:"#8E8E93" },
+  backBtn: { background:"none", border:"none", fontSize:28, color:"#007AFF", cursor:"pointer", padding:0, lineHeight:1 },
+  modeSwitch: { display:"flex", gap:8, background:"#F2F2F7", borderRadius:12, padding:4 },
+  modeBtn: { flex:1, padding:"8px 0", borderRadius:8, border:"none", background:"transparent", cursor:"pointer", fontSize:14, color:"#8E8E93" },
+  modeBtnActive: { background:"#fff", color:"#1C1C1E", fontWeight:600, boxShadow:"0 1px 4px rgba(0,0,0,0.1)" },
+  planTextarea: { flex:1, minHeight:200, border:"none", borderRadius:14, padding:14, fontSize:15, lineHeight:1.6, color:"#1C1C1E", background:"#fff", resize:"none", outline:"none", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" },
+  clearBtn: { background:"none", border:"1px solid #FF3B30", color:"#FF3B30", borderRadius:10, padding:"8px 16px", cursor:"pointer", fontSize:14, alignSelf:"flex-start" },
+  calWeekRow: { display:"grid", gridTemplateColumns:"repeat(7, 1fr)", gap:4, marginBottom:6 },
+  calWeekLabel: { textAlign:"center", fontSize:12, color:"#8E8E93", fontWeight:600 },
+  calGrid: { display:"grid", gridTemplateColumns:"repeat(7, 1fr)", gap:4 },
+  calDay: { aspectRatio:"1", borderRadius:8, border:"none", background:"#fff", fontSize:13, cursor:"pointer", color:"#1C1C1E", boxShadow:"0 1px 2px rgba(0,0,0,0.05)" },
+  calDayMarked: { background:"#007AFF", color:"#fff", fontWeight:700 },
+  calHint: { textAlign:"center", fontSize:12, color:"#C7C7CC", marginTop:10 },
+  datePicker: { width:"100%", border:"none", borderRadius:12, padding:"12px 14px", fontSize:16, background:"#fff", color:"#1C1C1E", outline:"none" },
+  emptyDay: { textAlign:"center", color:"#C7C7CC", fontSize:14, padding:"20px 0 8px" },
+  bottomTabs: { position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, display:"flex", background:"rgba(28,28,30,0.9)", backdropFilter:"blur(20px)", padding:"12px 0 32px", zIndex:100 },
+  bottomTab: { flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:"none", border:"none", cursor:"pointer", padding:"4px 0" },
+  bottomTabLabel: { fontSize:10, color:"rgba(255,255,255,0.6)" },
+  expandHint: { position:"fixed", bottom:110, left:"50%", transform:"translateX(-50%)", color:"rgba(255,255,255,0.4)", fontSize:12, cursor:"pointer", zIndex:99 },
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
