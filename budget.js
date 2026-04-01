@@ -10,7 +10,7 @@ const CATEGORIES = [
 ];
 
 // ── 新增記帳 Modal ─────────────────────────────────────────
-function AddExpenseModal({ user, displayName, defaultMonth, onSave, onClose }) {
+function AddExpenseModal({ user, defaultMonth, onSave, onClose }) {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState(CATEGORIES[0].id);
   const [note, setNote] = useState("");
@@ -38,7 +38,7 @@ function AddExpenseModal({ user, displayName, defaultMonth, onSave, onClose }) {
       amount: Math.round(num),
       category,
       note: note.trim(),
-      who: displayName,
+      who: user,
       time: new Date().toLocaleTimeString("zh-TW", { hour:"2-digit", minute:"2-digit" }),
       date,
     });
@@ -107,6 +107,10 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
   const [showAdd, setShowAdd] = useState(false);
   const [partner, setPartner] = useState(undefined);
   const [filterWho, setFilterWho] = useState("all");
+  const [pullY, setPullY] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const pullStart = useRef(null);
+  const scrollRef = useRef(null);
   const [viewMonth, setViewMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
@@ -117,6 +121,20 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
   const SHEET = "budget";
   const myKey = `${user}_${viewMonth}`;
   const partnerKey = partner ? `${partner}_${viewMonth}` : null;
+
+  function clearMonthCache() {
+    if (window._CACHE) {
+      delete window._CACHE[`_shared:${SHEET}:${myKey}`];
+      if (partnerKey) delete window._CACHE[`_shared:${SHEET}:${partnerKey}`];
+    }
+  }
+
+  function refresh() {
+    clearMonthCache();
+    setMyRecords([]);
+    setPartnerRecords([]);
+    setRefreshKey(k => k + 1); // 強制 useEffect 重新執行
+  }
 
   // 載入 partner（先查快取，沒有才打 API）
   useEffect(()=>{
@@ -173,7 +191,7 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
       }
       setLoaded(true);
     });
-  }, [viewMonth, partner]);
+  }, [viewMonth, partner, refreshKey]);
 
   function save(next) {
     setMyRecords(next);
@@ -205,8 +223,8 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
   // 篩選
   const filteredRecords = allRecords.filter(r => {
     if (!partner || filterWho === "all") return true;
-    if (filterWho === "me") return r.who === displayName;
-    return r.who !== displayName;
+    if (filterWho === "me") return r.who === user;
+    return r.who !== user;
   });
 
   // 統計
@@ -220,11 +238,13 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
 
   // 月份切換
   function prevMonth() {
+    clearMonthCache();
     const [y,m] = viewMonth.split("-").map(Number);
     if (m === 1) setViewMonth(`${y-1}-12`);
     else setViewMonth(`${y}-${String(m-1).padStart(2,'0')}`);
   }
   function nextMonth() {
+    clearMonthCache();
     const [y,m] = viewMonth.split("-").map(Number);
     if (m === 12) setViewMonth(`${y+1}-01`);
     else setViewMonth(`${y}-${String(m+1).padStart(2,'0')}`);
@@ -238,7 +258,25 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
   })();
 
   return (
-    <div style={{ height:"100%", overflowY:"auto", padding:"20px 20px 100px", background:C.bg }}>
+    <div ref={scrollRef} style={{ height:"100%", overflowY:"auto", padding:"20px 20px 100px", background:C.bg }}
+      onTouchStart={e=>{
+        if (scrollRef.current?.scrollTop === 0) pullStart.current = e.touches[0].clientY;
+      }}
+      onTouchMove={e=>{
+        if (pullStart.current === null) return;
+        const dy = e.touches[0].clientY - pullStart.current;
+        if (dy > 0) setPullY(Math.min(dy, 80));
+      }}
+      onTouchEnd={()=>{
+        if (pullY > 60) { refresh(); }
+        setPullY(0); pullStart.current = null;
+      }}>
+      {/* 下拉重整提示 */}
+      {pullY > 0 && (
+        <div style={{ textAlign:"center", fontSize:13, color:C.sub, height:pullY, display:"flex", alignItems:"center", justifyContent:"center", transition:"height 0.2s" }}>
+          {pullY > 60 ? "放開重新整理 ↑" : "下拉重新整理 ↓"}
+        </div>
+      )}
 
       {/* 統計卡 */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
@@ -337,7 +375,6 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
       {showAdd && (
         <AddExpenseModal
           user={user}
-          displayName={displayName}
           defaultMonth={viewMonth}
           onSave={handleAdd}
           onClose={()=>setShowAdd(false)}

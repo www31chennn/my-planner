@@ -298,7 +298,7 @@ function MainShell({ user, password, displayName: displayName_prop }) {
           const h = (val && String(val).trim() && String(val) !== "null") ? String(val).trim() : "";
           _cacheSet(user, "settings", "height", h);
         });
-      // 月份計畫
+      // 月份計畫（最後完成後 log 所有快取）
       apiCall({ action:"readAll", user, sheet:"month" }).then(rows => {
         if (!Array.isArray(rows)) return;
         rows.forEach(r => {
@@ -309,12 +309,9 @@ function MainShell({ user, password, displayName: displayName_prop }) {
           const k = `${thisYear}_${m}`;
           if (!window._CACHE[`${user}:month:${k}`]) _cacheSet(user, "month", k, "");
         }
+        console.log("📦 背景預載完成，快取共", Object.keys(window._CACHE||{}).length, "筆:", Object.keys(window._CACHE||{}));
       });
       // partner 記帳已在必要預載時一起處理
-      // 背景預載完成後 log 快取狀態
-      setTimeout(()=>{
-        console.log("📦 快取共", Object.keys(window._CACHE||{}).length, "筆:", Object.keys(window._CACHE||{}));
-      }, 3000);
     }, 100);
   },[]);
 
