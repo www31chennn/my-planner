@@ -15,6 +15,7 @@
   <script src="/commons.js" type="text/babel"></script>
   <script src="/planner.js" type="text/babel"></script>
   <script src="/subscriptions.js" type="text/babel"></script>
+  <script src="/weight.js" type="text/babel"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body, #root { height: 100%; }
@@ -42,6 +43,7 @@ const { useState, useEffect, useRef } = React;
 const MODULES = [
   { id:"planner", label:"計畫本", emoji:"📓", component: PlannerApp },
   { id:"subscriptions", label:"訂閱管理", emoji:"💳", component: SubscriptionsApp },
+  { id:"weight", label:"體重記錄", emoji:"⚖️", component: WeightApp },
 ];
 
 function CoverPage({ onLogin }) {
@@ -285,6 +287,7 @@ function MainShell({ user, password, displayName: displayName_prop }) {
         {ActiveModule && (
           <ActiveModule
             user={user}
+            password={password}
             saving={saving}
             setSaving={setSaving}
             plannerName={plannerName}
