@@ -36,17 +36,17 @@ async function hashPassword(password) {
   return hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-// ── 全域快取 ───────────────────────────────────────────────
-const CACHE = {};
+// ── 全域快取（用 window 讓所有模組共用）────────────────────
+window._CACHE = window._CACHE || {};
 
 function cacheGet(user, sheet, key) {
-  return CACHE[`${user}:${sheet}:${key}`];
+  return window._CACHE[`${user}:${sheet}:${key}`];
 }
 function cacheSet(user, sheet, key, value) {
-  CACHE[`${user}:${sheet}:${key}`] = value;
+  window._CACHE[`${user}:${sheet}:${key}`] = value;
 }
 function cacheHas(user, sheet, key) {
-  return `${user}:${sheet}:${key}` in CACHE;
+  return `${user}:${sheet}:${key}` in window._CACHE;
 }
 function cacheUpdate(user, sheet, key, value) {
   cacheSet(user, sheet, key, value);

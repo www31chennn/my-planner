@@ -133,6 +133,24 @@ function MonthPlanner({ user, saving, setSaving, year }) {
   function getKey(m) { return `${year}_${m}`; }
 
   useEffect(() => {
+    // 先檢查今年 12 個月的快取是否都有
+    const allCached = Array.from({length:12}, (_,i) => i+1)
+      .every(m => cacheHas(user, "month", `${year}_${m}`));
+
+    if (allCached) {
+      // 快取都有，直接從快取建立 monthCache
+      const newCache = {};
+      for (let m = 1; m <= 12; m++) {
+        const key = `${year}_${m}`;
+        const cached = cacheGet(user, "month", key);
+        try { newCache[key] = cached ? JSON.parse(cached) : {}; } catch { newCache[key] = {}; }
+      }
+      setMonthCache(p => ({ ...p, ...newCache }));
+      setListLoaded(true);
+      return;
+    }
+
+    // 快取沒有，打 API
     setListLoaded(false);
     apiCall({ action:"readAll", user, sheet:"month" }).then(rows => {
       const newCache = {};
@@ -144,6 +162,11 @@ function MonthPlanner({ user, saving, setSaving, year }) {
           try { newCache[String(r[0])] = JSON.parse(r[1]); } catch { newCache[String(r[0])] = {}; }
           cacheUpdate(user, "month", String(r[0]), r[1]||"");
         });
+      }
+      // 空白月份也存進快取
+      for (let m = 1; m <= 12; m++) {
+        const key = `${year}_${m}`;
+        if (!cacheHas(user, "month", key)) cacheSet(user, "month", key, "");
       }
       setMonthCache(p => ({ ...p, ...newCache }));
       setListLoaded(true);

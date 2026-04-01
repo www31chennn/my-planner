@@ -102,19 +102,40 @@ function WeightApp({ user, password, saving, setSaving }) {
   const [showHeightInput, setShowHeightInput] = useState(false);
   const [heightInput, setHeightInput] = useState("");
 
-  // 載入身高
+  // 載入身高（用快取避免閃爍）
   useEffect(()=>{
+    const cachedHeight = cacheHas(user, "settings", "height") ? cacheGet(user, "settings", "height") : null;
+    if (cachedHeight !== null) {
+      if (cachedHeight) {
+        setHeight(parseFloat(cachedHeight));
+        setHeightInput(String(cachedHeight));
+      }
+      return;
+    }
     apiCall({ action:"getHeight", user, password }).then(val => {
       if (val && String(val).trim() && String(val) !== "null") {
-        setHeight(parseFloat(String(val)));
-        setHeightInput(String(val));
+        const h = String(val).trim();
+        setHeight(parseFloat(h));
+        setHeightInput(h);
+        cacheSet(user, "settings", "height", h);
+      } else {
+        cacheSet(user, "settings", "height", "");
       }
     });
   }, []);
 
   useEffect(()=>{
+    // 先查快取
+    if (cacheHas(user, SHEET, KEY)) {
+      const cached = cacheGet(user, SHEET, KEY);
+      try { setData(cached ? JSON.parse(cached) : {}); } catch { setData({}); }
+      setLoaded(true);
+      return;
+    }
     setLoaded(false);
     apiCall({ action:"readOne", user, sheet:SHEET, key:KEY }).then(val => {
+      const str = typeof val === "string" ? val : JSON.stringify(val||{});
+      cacheSet(user, SHEET, KEY, str);
       try {
         if (!val) { setData({}); }
         else if (typeof val === "object" && !Array.isArray(val)) { setData(val); }
@@ -126,6 +147,7 @@ function WeightApp({ user, password, saving, setSaving }) {
 
   function save(next) {
     setData(next);
+    cacheSet(user, SHEET, KEY, JSON.stringify(next));
     setSaving(p=>({...p, weight:true}));
     clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
@@ -221,6 +243,7 @@ function WeightApp({ user, password, saving, setSaving }) {
               if (isNaN(h)||h<100||h>250) return;
               setHeight(h);
               setShowHeightInput(false);
+              cacheSet(user, "settings", "height", String(h));
               await apiCall({ action:"saveHeight", user, password, value:String(h) });
             }} style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"8px 14px", cursor:"pointer", fontSize:13, fontWeight:600 }}>儲存</button>
           </div>

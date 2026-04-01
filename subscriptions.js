@@ -317,8 +317,21 @@ function SubscriptionsApp({ user, saving, setSaving }) {
   const KEY = `${user}_list`;
 
   useEffect(() => {
+    // 先查快取
+    if (cacheHas("_shared", SHEET, KEY)) {
+      const cached = cacheGet("_shared", SHEET, KEY);
+      try {
+        if (!cached) { setSubs([]); }
+        else if (Array.isArray(cached)) { setSubs(cached); }
+        else { setSubs(JSON.parse(cached)); }
+      } catch { setSubs([]); }
+      setLoaded(true);
+      return;
+    }
+    // 快取沒有才打 API
     apiCall({ action:"readOne", user:"_shared", sheet:SHEET, key:KEY }).then(val => {
-      // apiCall 已經做過 JSON.parse，val 可能是陣列或字串
+      const str = typeof val === "string" ? val : JSON.stringify(val||[]);
+      cacheSet("_shared", SHEET, KEY, str);
       try {
         if (!val) { setSubs([]); }
         else if (Array.isArray(val)) { setSubs(val); }
@@ -330,6 +343,7 @@ function SubscriptionsApp({ user, saving, setSaving }) {
 
   function save(next) {
     setSubs(next);
+    cacheSet("_shared", SHEET, KEY, JSON.stringify(next));
     setSaving(p=>({...p, subs:true}));
     clearTimeout(timer.current);
     timer.current = setTimeout(async () => {

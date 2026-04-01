@@ -16,6 +16,7 @@
   <script src="/planner.js" type="text/babel"></script>
   <script src="/subscriptions.js" type="text/babel"></script>
   <script src="/weight.js" type="text/babel"></script>
+  <script src="/budget.js" type="text/babel"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body, #root { height: 100%; }
@@ -44,6 +45,7 @@ const MODULES = [
   { id:"planner", label:"計畫本", emoji:"📓", component: PlannerApp },
   { id:"subscriptions", label:"訂閱管理", emoji:"💳", component: SubscriptionsApp },
   { id:"weight", label:"體重記錄", emoji:"⚖️", component: WeightApp },
+  { id:"budget", label:"記帳", emoji:"💰", component: BudgetApp },
 ];
 
 function CoverPage({ onLogin }) {
@@ -247,10 +249,73 @@ function MainShell({ user, password, displayName: displayName_prop }) {
   useEffect(()=>{
     const now = new Date();
     const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const nowMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+    // 必要資料：載完才顯示畫面（加入 partner 查詢）
     Promise.all([
       cachedReadOne(user, "goals", String(thisYear)),
       cachedReadOne(user, "daily", todayKey),
-    ]).then(()=>setAppLoading(false));
+      apiCall({ action:"getBudgetPartner", user, password }).then(val => {
+        const partner = (val && String(val).trim() && String(val) !== "null") ? String(val).trim() : "";
+        // 存進 window._CACHE 讓 budget.js 可以讀到
+        window._CACHE = window._CACHE || {};
+        window._CACHE[`${user}:budget_partner:partner`] = partner;
+        return partner;
+      }),
+    ]).then(([,,partner])=>{
+      setAppLoading(false);
+      console.log("✅ 必要資料載入完成，partner:", partner||"無");
+      // 背景同時載入我的和 partner 的記帳
+      const nowM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      if (partner) {
+        apiCall({ action:"readOne", user:"_shared", sheet:"budget", key:`${partner}_${nowM}` })
+          .then(val => {
+            window._CACHE[`_shared:budget:${partner}_${nowM}`] = typeof val==="string" ? val : JSON.stringify(val||[]);
+          });
+      }
+    });
+
+    // 背景預載：全部同時發，直接寫 window._CACHE
+    function _cacheSet(u, sheet, key, val) {
+      window._CACHE = window._CACHE || {};
+      window._CACHE[`${u}:${sheet}:${key}`] = typeof val==="string" ? val : JSON.stringify(val||"");
+    }
+    setTimeout(()=>{
+      const weightKey = `${now.getFullYear()}_${now.getMonth()+1}`;
+
+      // 體重
+      apiCall({ action:"readOne", user, sheet:"weight", key:weightKey })
+        .then(val => _cacheSet(user, "weight", weightKey, val||{}));
+      // 訂閱
+      apiCall({ action:"readOne", user:"_shared", sheet:"subscriptions", key:`${user}_list` })
+        .then(val => _cacheSet("_shared", "subscriptions", `${user}_list`, val||[]));
+      // 我的記帳
+      apiCall({ action:"readOne", user:"_shared", sheet:"budget", key:`${user}_${nowMonth}` })
+        .then(val => _cacheSet("_shared", "budget", `${user}_${nowMonth}`, val||[]));
+      // 身高
+      apiCall({ action:"getHeight", user, password })
+        .then(val => {
+          const h = (val && String(val).trim() && String(val) !== "null") ? String(val).trim() : "";
+          _cacheSet(user, "settings", "height", h);
+        });
+      // 月份計畫
+      apiCall({ action:"readAll", user, sheet:"month" }).then(rows => {
+        if (!Array.isArray(rows)) return;
+        rows.forEach(r => {
+          if (!r[0] || r[0] === "key") return;
+          _cacheSet(user, "month", String(r[0]), r[1]||"");
+        });
+        for (let m = 1; m <= 12; m++) {
+          const k = `${thisYear}_${m}`;
+          if (!window._CACHE[`${user}:month:${k}`]) _cacheSet(user, "month", k, "");
+        }
+      });
+      // partner 記帳已在必要預載時一起處理
+      // 背景預載完成後 log 快取狀態
+      setTimeout(()=>{
+        console.log("📦 快取共", Object.keys(window._CACHE||{}).length, "筆:", Object.keys(window._CACHE||{}));
+      }, 3000);
+    }, 100);
   },[]);
 
   function handleLogout() {
@@ -288,6 +353,7 @@ function MainShell({ user, password, displayName: displayName_prop }) {
           <ActiveModule
             user={user}
             password={password}
+            displayName={displayName}
             saving={saving}
             setSaving={setSaving}
             plannerName={plannerName}
