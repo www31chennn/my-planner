@@ -8,7 +8,7 @@ const USD_TO_NTD = 32; // 匯率，之後可以改
 // 8 個常用服務（顯示在快選按鈕）
 const QUICK_PICKS = [
   { name:"Netflix",      domain:"netflix.com" },
-  { name:"Disney+",        domain:"disneyplus.com" },
+  { name:"Disney+",      domain:"disneyplus.com" },
   { name:"YouTube",      domain:"youtube.com" },
   { name:"Apple Music",  domain:"music.apple.com" },
   { name:"iCloud",       domain:"icloud.com" },
@@ -81,6 +81,9 @@ function SubModal({ sub, onSave, onClose }) {
   const [card, setCard] = useState(sub?.card || "");
   const [saving, setSaving] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
+  const [emoji, setEmoji] = useState(sub?.emoji || "");
+  const [logoFailed, setLogoFailed] = useState(false);
+  const [showEmojiInput, setShowEmojiInput] = useState(false);
 
   const logoUrl = getLogoUrl(domain, name);
 
@@ -91,6 +94,7 @@ function SubModal({ sub, onSave, onClose }) {
       id: sub?.id || Date.now(),
       name: name.trim(),
       domain: domain.trim(),
+      emoji: emoji.trim(),
       amount: parseFloat(amount),
       currency,
       cycle,
@@ -118,7 +122,7 @@ function SubModal({ sub, onSave, onClose }) {
                 {QUICK_PICKS.map(p => {
                   const selected = name === p.name;
                   return (
-                    <button key={p.name} onClick={()=>{ setName(p.name); setDomain(p.domain); setSuggestions([]); }}
+                    <button key={p.name} onClick={()=>{ setName(p.name); setDomain(p.domain); setLogoFailed(false); setEmoji(""); setSuggestions([]); }}
                       style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:20, border:`1.5px solid ${selected?C.accent:C.border}`, background:selected?C.accentLight:C.card, cursor:"pointer", transition:"all 0.15s" }}>
                       <img src={getLogoUrl(p.domain, p.name)} width={16} height={16} style={{ objectFit:"contain" }} onError={e=>e.target.style.display="none"} />
                       <span style={{ fontSize:13, fontWeight:selected?600:400, color:selected?C.accent:C.text }}>{p.name}</span>
@@ -131,12 +135,42 @@ function SubModal({ sub, onSave, onClose }) {
 
           {/* Logo 預覽 + 名稱輸入 */}
           <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-            <div style={{ width:48, height:48, borderRadius:12, background:C.bg, border:`1.5px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0 }}>
-              {logoUrl ? <img src={logoUrl} width={32} height={32} style={{ objectFit:"contain" }} onError={e=>e.target.style.display="none"} /> : <span style={{ fontSize:22 }}>📦</span>}
+            <div
+              onClick={()=>{ if(name.trim()) setShowEmojiInput(true); }}
+              style={{ width:48, height:48, borderRadius:12, background:C.bg, border:`1.5px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0, cursor:name.trim()?"pointer":"default" }}>
+              {emoji ? (
+                <span style={{ fontSize:26, lineHeight:1 }}>{emoji}</span>
+              ) : logoUrl && !logoFailed ? (
+                <img src={logoUrl} width={32} height={32} style={{ objectFit:"contain" }} onError={()=>setLogoFailed(true)} />
+              ) : (
+                <span style={{ fontSize:22, opacity:0.3, lineHeight:1 }}>📦</span>
+              )}
             </div>
+            {showEmojiInput && ReactDOM.createPortal(
+              <div id="emoji-backdrop" style={{ position:"fixed", inset:0, zIndex:999, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,0.15)" }}
+                onClick={()=>setShowEmojiInput(false)}>
+                <div className="pop-in" onClick={e=>e.stopPropagation()}
+                  style={{ background:C.card, borderRadius:16, padding:16, boxShadow:"0 8px 40px rgba(0,0,0,0.2)", width:220, margin:20 }}>
+                  <div style={{ fontSize:11, color:C.sub, marginBottom:10, textAlign:"center" }}>選擇或輸入圖示</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10, justifyContent:"center" }}>
+                    {["🎵","📱","☁️","🤖","🎬","🎮","📧","💼","🔧","📚","🏋️","✈️","🎯","💡","🌐","🎨"].map(em=>(
+                      <button key={em} onClick={()=>{ setEmoji(em); setShowEmojiInput(false); }}
+                        style={{ fontSize:22, background:emoji===em?C.accentLight:"none", border:`1.5px solid ${emoji===em?C.accent:"transparent"}`, cursor:"pointer", borderRadius:8, padding:4, lineHeight:1 }}>{em}</button>
+                    ))}
+                  </div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <input value={emoji} onChange={e=>setEmoji(e.target.value)} placeholder="自訂"
+                      maxLength={2} style={{ width:52, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"8px 0", fontSize:emoji?22:13, outline:"none", background:C.bg, textAlign:"center", flexShrink:0 }} />
+                    <button onClick={()=>setShowEmojiInput(false)}
+                      style={{ flex:1, background:C.accent, color:"#fff", border:"none", borderRadius:8, padding:"8px 0", cursor:"pointer", fontSize:13, fontWeight:600 }}>好</button>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
             <div style={{ flex:1 }}>
               <div style={label}>服務名稱</div>
-              <input value={name} onChange={e=>{ setName(e.target.value); setDomain(""); setSuggestions(searchPresets(e.target.value)); }}
+              <input value={name} onChange={e=>{ setName(e.target.value); setDomain(""); setLogoFailed(false); setEmoji(""); setSuggestions(searchPresets(e.target.value)); }}
                 placeholder="或自行輸入名稱…" style={inp} autoComplete="off" />
             </div>
           </div>
@@ -146,7 +180,7 @@ function SubModal({ sub, onSave, onClose }) {
             {suggestions.length > 0 && (
               <div style={{ position:"absolute", top:0, left:0, right:0, background:C.card, border:`1.5px solid ${C.border}`, borderRadius:12, overflow:"hidden", boxShadow:"0 8px 24px rgba(0,0,0,0.12)", zIndex:50 }}>
                 {suggestions.map((p,i) => (
-                  <button key={p.name+i} onClick={()=>{ setName(p.name); setDomain(p.domain); setSuggestions([]); }}
+                  <button key={p.name+i} onClick={()=>{ setName(p.name); setDomain(p.domain); setLogoFailed(false); setEmoji(""); setSuggestions([]); }}
                     style={{ width:"100%", display:"flex", alignItems:"center", gap:12, padding:"10px 14px", background:"none", border:"none", borderBottom:i<suggestions.length-1?`1px solid ${C.border}`:"none", cursor:"pointer", textAlign:"left" }}>
                     <div style={{ width:28, height:28, borderRadius:8, background:C.bg, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0 }}>
                       <img src={getLogoUrl(p.domain, p.name)} width={20} height={20} style={{ objectFit:"contain" }} onError={e=>e.target.style.display="none"} />
@@ -213,7 +247,13 @@ function SubCard({ sub, onEdit, onDelete }) {
     <div className="fade-up" style={{ background:C.card, borderRadius:16, padding:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.07)", display:"flex", alignItems:"center", gap:14 }}>
       {/* Logo */}
       <div style={{ width:44, height:44, borderRadius:12, background:C.bg, border:`1.5px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", flexShrink:0 }}>
-        {logoUrl ? <img src={logoUrl} width={28} height={28} style={{ objectFit:"contain" }} onError={e=>e.target.style.display="none"} /> : <span style={{ fontSize:20 }}>📦</span>}
+        {sub.emoji ? (
+          <span style={{ fontSize:24, lineHeight:1 }}>{sub.emoji}</span>
+        ) : (
+          <img src={logoUrl} width={28} height={28} style={{ objectFit:"contain" }}
+            onError={e=>{ e.target.style.display="none"; e.target.nextSibling.style.display="block"; }} />
+        )}
+        {!sub.emoji && <span style={{ fontSize:20, display:"none" }}>📦</span>}
       </div>
 
       {/* 資訊 */}
