@@ -12,14 +12,15 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="/commons.js" type="text/babel"></script>
+  <script src="/planner.js" type="text/babel"></script>
+  <script src="/subscriptions.js" type="text/babel"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body, #root { height: 100%; }
     body { background: #F7F5F2; overscroll-behavior: none; font-family: 'Noto Sans TC', sans-serif; }
     input, textarea, button, select { font-family: inherit; }
     ::-webkit-scrollbar { display: none; }
-    .swipe-container { display: flex; width: 300%; height: 100%; transition: transform 0.38s cubic-bezier(0.4,0,0.2,1); will-change: transform; }
-    .swipe-panel { width: 33.333%; height: 100%; overflow-y: auto; flex-shrink: 0; }
     @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
     @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -27,6 +28,10 @@
     .fade-up { animation: fadeUp 0.3s ease forwards; }
     .fade-in { animation: fadeIn 0.4s ease forwards; }
     .pop-in { animation: popIn 0.18s ease forwards; }
+    .menu-overlay { position:fixed; inset:0; z-index:200; display:flex; }
+    .menu-backdrop { position:absolute; inset:0; background:rgba(0,0,0,0.3); }
+    .menu-panel { position:relative; width:260px; background:#fff; height:100%; display:flex; flex-direction:column; box-shadow:4px 0 20px rgba(0,0,0,0.1); animation:slideIn 0.25s ease; }
+    @keyframes slideIn { from { transform:translateX(-100%); } to { transform:translateX(0); } }
   </style>
 </head>
 <body>
@@ -34,98 +39,11 @@
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-// 自動偵測平台，不用手動改
-const API = (() => {
-  const host = window.location.hostname;
-  if (host.includes("netlify")) return "/.netlify/functions/api";
-  return "/api/proxy"; // Vercel 或其他
-})();
+const MODULES = [
+  { id:"planner", label:"計畫本", emoji:"📓", component: PlannerApp },
+  { id:"subscriptions", label:"訂閱管理", emoji:"💳", component: SubscriptionsApp },
+];
 
-// 密碼 SHA-256 加密
-async function hashPassword(password) {
-  const msgBuffer = new TextEncoder().encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
-async function apiCall(params) {
-  try {
-    const qs = Object.entries(params)
-      .map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-      .join("&");
-    const res = await fetch(`${API}?${qs}`);
-    const text = await res.text();
-    try { return JSON.parse(text); } catch { return text; }
-  } catch(e) { console.error("API error:", e); return null; }
-}
-
-// 讀取整個分頁，回傳 { key: value } 的 map
-async function readAll(user, sheet) {
-  const rows = await apiCall({ action:"readAll", user, sheet });
-  if (!Array.isArray(rows)) return {};
-  const map = {};
-  rows.forEach(r => { if (r[0] && r[0] !== "key") map[String(r[0])] = r[1]; });
-  return map;
-}
-
-// 寫入單行
-async function writeOne(user, sheet, key, value) {
-  return await apiCall({ action:"writeOne", user, sheet, key: String(key), value: String(value) });
-}
-
-// 刪除單行
-async function deleteOne(user, sheet, key) {
-  return await apiCall({ action:"deleteOne", user, sheet, key: String(key) });
-}
-
-// ── 全域快取 ──────────────────────────────────────────────
-// 資料第一次從 API 載入後存在這裡，切換頁面不用重新請求
-const CACHE = {};
-function cacheGet(user, sheet, key) {
-  return CACHE[`${user}:${sheet}:${key}`];
-}
-function cacheSet(user, sheet, key, value) {
-  CACHE[`${user}:${sheet}:${key}`] = value;
-}
-function cacheHas(user, sheet, key) {
-  return `${user}:${sheet}:${key}` in CACHE;
-}
-
-async function cachedReadOne(user, sheet, key) {
-  if (cacheHas(user, sheet, key)) return cacheGet(user, sheet, key);
-  const raw = await apiCall({ action:"readOne", user, sheet, key:String(key) });
-  // raw 可能是 null、字串、或物件（month/goals 是 JSON）
-  // 統一轉成字串存快取，注意 Apps Script ok() 會對字串雙重編碼
-  let val = "";
-  if (raw === null || raw === undefined) {
-    val = "";
-  } else if (typeof raw === "string") {
-    val = raw;
-  } else {
-    // 物件或陣列（month/goals）直接 JSON.stringify 存
-    val = JSON.stringify(raw);
-  }
-  cacheSet(user, sheet, key, val);
-  return val;
-}
-
-function cacheUpdate(user, sheet, key, value) {
-  cacheSet(user, sheet, key, value);
-}
-
-const MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
-const DAYS_IN_MONTH = (m,y) => new Date(y,m,0).getDate();
-const FIRST_DAY = (m,y) => new Date(y,m-1,1).getDay();
-const DEFAULT_MOODS = ["😊","😢","😡","😴","🥰","😰","🎉","💪","🌧","☀️"];
-
-const C = {
-  bg:"#F7F5F2", card:"#FFFFFF", border:"#EBEBEB",
-  text:"#1A1A1A", sub:"#9A9A9A", accent:"#4A7C59",
-  accentLight:"#EAF2EC", red:"#D0533A",
-};
-
-// ── Cover ─────────────────────────────────────────────────
 function CoverPage({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -163,6 +81,7 @@ function CoverPage({ onLogin }) {
   }
 
   const inp = { width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"13px 16px", fontSize:15, color:C.text, background:C.card, outline:"none" };
+
   return (
     <div className="fade-in" style={{ height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:C.bg, padding:"0 32px" }}>
       <div style={{ width:"100%", maxWidth:360 }}>
@@ -198,416 +117,69 @@ function CoverPage({ onLogin }) {
   );
 }
 
-function SaveDot({ saving }) {
+function HamburgerMenu({ user, displayName, currentModule, onSwitch, onSettings, onLogout, onClose }) {
   return (
-    <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:saving?C.sub:C.accent }}>
-      <div style={{ width:6, height:6, borderRadius:3, background:saving?C.sub:C.accent, transition:"background 0.3s" }} />
-      {saving?"儲存中":"已儲存"}
-    </div>
-  );
-}
-
-// ── Year Goals ─────────────────────────────────────────────
-// Sheet key: "goals"  Row key: year (e.g. "2026")  Value: JSON array
-function YearGoals({ user, saving, setSaving, year }) {
-  const [list, setList] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const timer = useRef(null);
-
-  useEffect(() => {
-    // 先看全域 CACHE 有沒有，有的話直接用
-    if (cacheHas(user, "goals", String(year))) {
-      const cached = cacheGet(user, "goals", String(year));
-      try { setList(cached ? JSON.parse(cached) : []); } catch { setList([]); }
-      setLoaded(true);
-      return;
-    }
-    setLoaded(false);
-    cachedReadOne(user, "goals", String(year)).then(val => {
-      try { setList(val ? JSON.parse(val) : []); } catch { setList([]); }
-      setLoaded(true);
-    });
-  }, [year]);
-
-  function save(next) {
-    setList(next);
-    cacheUpdate(user, "goals", String(year), JSON.stringify(next));
-    setSaving(p=>({...p,goals:true}));
-    clearTimeout(timer.current);
-    timer.current = setTimeout(async () => {
-      await writeOne(user, "goals", String(year), JSON.stringify(next));
-      setSaving(p=>({...p,goals:false}));
-    }, 1500);
-  }
-
-  function toggle(i) {
-    const n = [...list];
-    const isDone = !n[i].done;
-    n[i] = { ...n[i], done:isDone, doneDate: isDone ? new Date().toLocaleDateString("zh-TW",{month:"numeric",day:"numeric"}) : "" };
-    save(n);
-  }
-
-  const done = list.filter(g=>g.done&&g.text).length;
-  const total = list.filter(g=>g.text).length;
-
-  if (!loaded) return (
-    <div style={{ padding:40, display:"flex", justifyContent:"center" }}>
-      <div style={{ width:28, height:28, borderRadius:14, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
-    </div>
-  );
-
-  return (
-    <div style={{ padding:"20px 20px 120px" }}>
-      <div style={{ marginBottom:20 }}>
-        <div style={{ fontSize:13, color:C.sub, letterSpacing:2, marginBottom:4 }}>年度目標</div>
-        <div style={{ fontSize:26, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text }}>{year}</div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:10 }}>
-          <div style={{ fontSize:13, color:C.sub }}>{total>0?`${done} / ${total} 完成`:"開始新增你的目標吧"}</div>
-          <SaveDot saving={saving} />
+    <div className="menu-overlay">
+      <div className="menu-backdrop" onClick={onClose} />
+      <div className="menu-panel">
+        <div style={{ padding:"52px 20px 20px", borderBottom:`1px solid ${C.border}` }}>
+          <div style={{ fontSize:28, marginBottom:8 }}>👤</div>
+          <div style={{ fontSize:16, fontWeight:700, color:C.text }}>{displayName}</div>
+          <div style={{ fontSize:12, color:C.sub, marginTop:2 }}>{user}</div>
         </div>
-        {total>0 && (
-          <div style={{ marginTop:8, height:3, background:C.border, borderRadius:2, overflow:"hidden" }}>
-            <div style={{ height:"100%", width:`${(done/total)*100}%`, background:C.accent, borderRadius:2, transition:"width 0.5s" }} />
-          </div>
-        )}
-      </div>
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {list.map((goal,i) => (
-          <div key={i} className="fade-up" style={{ background:C.card, borderRadius:14, padding:"12px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", opacity:goal.done?0.5:1, animationDelay:`${i*20}ms` }}>
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              <button onClick={()=>toggle(i)} style={{ width:22, height:22, borderRadius:11, border:`2px solid ${goal.done?C.accent:C.border}`, background:goal.done?C.accent:"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, padding:0, transition:"all 0.2s" }}>
-                {goal.done && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7.5L10 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-              </button>
-              <input style={{ flex:1, border:"none", outline:"none", fontSize:15, background:"transparent", textDecoration:goal.done?"line-through":"none", color:goal.done?C.sub:C.text, minWidth:0 }}
-                placeholder={`目標 ${i+1}`} value={goal.text}
-                onChange={e=>{ const n=[...list]; n[i]={...n[i],text:e.target.value}; save(n); }} />
-              <button onClick={()=>save(list.filter((_,idx)=>idx!==i))} style={{ flexShrink:0, background:"none", border:"none", color:C.sub, cursor:"pointer", fontSize:18, padding:"0 2px", lineHeight:1 }}>×</button>
-            </div>
-            {goal.done&&goal.doneDate && (
-              <div style={{ fontSize:11, color:C.accent, marginTop:5, marginLeft:32 }}>✓ 完成於 {goal.doneDate}</div>
-            )}
-          </div>
-        ))}
-        <button onClick={()=>save([...list,{text:"",done:false,doneDate:""}])}
-          style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, background:"none", border:`1.5px dashed ${C.border}`, borderRadius:14, padding:"13px 0", cursor:"pointer", color:C.sub, fontSize:14 }}>
-          <span style={{ fontSize:20, lineHeight:1 }}>+</span> 新增目標
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Month Planner ──────────────────────────────────────────
-// Sheet key: "month"  Row key: "year_month" (e.g. "2026_3")  Value: JSON object
-function MoodPicker({ day, currentMood, onSelect, onClear, onClose }) {
-  const [custom, setCustom] = useState("");
-  useEffect(()=>{
-    function handle(e) { if(e.target.id==="mood-backdrop") onClose(); }
-    document.addEventListener("mousedown",handle);
-    return ()=>document.removeEventListener("mousedown",handle);
-  },[]);
-  return ReactDOM.createPortal(
-    <div id="mood-backdrop" style={{ position:"fixed", inset:0, zIndex:999, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,0.15)" }}>
-      <div className="pop-in" style={{ background:C.card, borderRadius:16, padding:16, boxShadow:"0 8px 40px rgba(0,0,0,0.2)", width:220, margin:20 }}>
-        <div style={{ fontSize:11, color:C.sub, marginBottom:8, textAlign:"center" }}>{day} 日的心情</div>
-        <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginBottom:10 }}>
-          {DEFAULT_MOODS.map(m=>(
-            <button key={m} onClick={()=>onSelect(m)} style={{ fontSize:21, background:currentMood===m?C.accentLight:"none", border:currentMood===m?`1.5px solid ${C.accent}`:"1.5px solid transparent", borderRadius:8, padding:3, cursor:"pointer" }}>{m}</button>
-          ))}
-        </div>
-        <div style={{ display:"flex", gap:6, marginBottom:currentMood?8:0 }}>
-          <input value={custom} onChange={e=>setCustom(e.target.value)} placeholder="自訂符號…" maxLength={2}
-            style={{ flex:1, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:14, outline:"none", color:C.text, background:C.bg, minWidth:0 }} />
-          <button onClick={()=>{ if(custom.trim()){ onSelect(custom.trim()); setCustom(""); }}}
-            style={{ background:C.accent, color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:13, fontWeight:600, flexShrink:0 }}>選</button>
-        </div>
-        {currentMood && <button onClick={onClear} style={{ width:"100%", fontSize:12, color:C.red, background:"none", border:`1px solid ${C.red}`, borderRadius:8, padding:"5px 0", cursor:"pointer" }}>清除心情</button>}
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-function MonthPlanner({ user, saving, setSaving, year }) {
-  const [selected, setSelected] = useState(null);
-  const [moodPickerDay, setMoodPickerDay] = useState(null);
-  const [monthCache, setMonthCache] = useState({});
-  const [listLoaded, setListLoaded] = useState(false);
-  const timers = useRef({});
-
-  function getKey(m) { return `${year}_${m}`; }
-
-  // 進入月份頁時，一次載入所有月份資料
-  useEffect(() => {
-    setListLoaded(false);
-    apiCall({ action:"readAll", user, sheet:"month" }).then(rows => {
-      const newCache = {};
-      // 先把所有月份都設為空（代表已載入，只是沒資料）
-      for (let m = 1; m <= 12; m++) {
-        newCache[`${year}_${m}`] = {};
-      }
-      // 再把有資料的月份蓋上去
-      if (Array.isArray(rows)) {
-        rows.forEach(r => {
-          if (!r[0] || r[0] === "key") return;
-          // 只處理當年的資料
-          if (!String(r[0]).startsWith(String(year))) return;
-          try { newCache[String(r[0])] = JSON.parse(r[1]); } catch { newCache[String(r[0])] = {}; }
-          cacheUpdate(user, "month", String(r[0]), r[1]||"");
-        });
-      }
-      setMonthCache(p => ({ ...p, ...newCache }));
-      setListLoaded(true);
-    });
-  }, [year]);
-
-  async function loadMonth(m) {
-    const key = getKey(m);
-    if (monthCache[key] !== undefined) return;
-    const val = await cachedReadOne(user, "month", key);
-    try {
-      setMonthCache(p => ({ ...p, [key]: val ? JSON.parse(val) : {} }));
-    } catch {
-      setMonthCache(p => ({ ...p, [key]: {} }));
-    }
-  }
-
-  function openMonth(m) {
-    setSelected(m);
-    // 只有在 monthCache 裡沒有這個月的資料才去載入
-    const key = getKey(m);
-    if (monthCache[key] === undefined) {
-      loadMonth(m);
-    }
-  }
-
-  function saveMonth(m, data) {
-    const key = getKey(m);
-    setMonthCache(p => ({ ...p, [key]: data }));
-    cacheUpdate(user, "month", key, JSON.stringify(data));
-    setSaving(p=>({...p,month:true}));
-    clearTimeout(timers.current[key]);
-    timers.current[key] = setTimeout(async () => {
-      await writeOne(user, "month", key, JSON.stringify(data));
-      setSaving(p=>({...p,month:false}));
-    }, 1500);
-  }
-
-  if (selected !== null) {
-    const key = getKey(selected);
-    const mData = monthCache[key];
-
-    if (mData === undefined) return (
-      <div style={{ padding:40, display:"flex", justifyContent:"center" }}>
-        <div style={{ width:28, height:28, borderRadius:14, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
-      </div>
-    );
-
-    const mode = mData.mode||"plan", marked = mData.marked||{};
-    const update = (patch) => saveMonth(selected, { ...mData, ...patch });
-
-    return (
-      <div style={{ padding:"20px 20px 120px" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
-          <button onClick={()=>{ setSelected(null); setMoodPickerDay(null); }}
-            style={{ width:32, height:32, borderRadius:16, background:C.border, border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-            <svg width="8" height="13" viewBox="0 0 8 13" fill="none"><path d="M7 1L1 6.5L7 12" stroke={C.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:13, color:C.sub }}>{year}</div>
-            <div style={{ fontSize:22, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text }}>{MONTHS[selected-1]}</div>
-          </div>
-          <SaveDot saving={saving} />
-        </div>
-        <div style={{ display:"flex", background:C.border, borderRadius:10, padding:3, marginBottom:20 }}>
-          {[["plan","📋 計畫"],["calendar","📅 日曆"]].map(([k,l])=>(
-            <button key={k} onClick={()=>update({mode:k})} style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:mode===k?600:400, color:mode===k?C.text:C.sub, background:mode===k?C.card:"transparent", transition:"all 0.2s" }}>{l}</button>
-          ))}
-        </div>
-        {mode==="plan" ? (
-          <div>
-            <textarea style={{ width:"100%", minHeight:220, border:`1.5px solid ${C.border}`, borderRadius:14, padding:16, fontSize:15, lineHeight:1.7, color:C.text, background:C.card, resize:"none", outline:"none" }}
-              placeholder={`記錄 ${MONTHS[selected-1]} 的計畫…`} value={mData.plan||""} onChange={e=>update({plan:e.target.value})} />
-            {mData.plan&&<button onClick={()=>update({plan:""})} style={{ marginTop:10, background:"none", border:`1px solid ${C.red}`, color:C.red, borderRadius:8, padding:"7px 14px", cursor:"pointer", fontSize:13 }}>清除</button>}
-          </div>
-        ):(
-          <div style={{ background:C.card, borderRadius:16, padding:16, boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
-            <div style={{ fontSize:11, color:C.sub, textAlign:"center", marginBottom:10 }}>點擊日期選擇心情或自訂符號</div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:8 }}>
-              {["日","一","二","三","四","五","六"].map(d=><div key={d} style={{ textAlign:"center", fontSize:11, color:C.sub, fontWeight:500, padding:"4px 0" }}>{d}</div>)}
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
-              {Array(FIRST_DAY(selected,year)).fill(null).map((_,i)=><div key={"e"+i} />)}
-              {Array(DAYS_IN_MONTH(selected,year)).fill(null).map((_,i)=>{
-                const day=i+1, mood=marked[day], isOpen=moodPickerDay===day;
-                const setMood=(mo)=>{ update({marked:{...marked,[day]:mo}}); setMoodPickerDay(null); };
-                const clearMood=()=>{ const nm={...marked}; delete nm[day]; update({marked:nm}); setMoodPickerDay(null); };
-                return (
-                  <div key={day}>
-                    <button onClick={()=>setMoodPickerDay(isOpen?null:day)}
-                      style={{ width:"100%", aspectRatio:"1", borderRadius:10, border:`1.5px solid ${mood?C.accent+"40":C.border}`, background:mood?C.accentLight:C.bg, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1, padding:2, transition:"all 0.15s" }}>
-                      <span style={{ color:C.sub, fontSize:10 }}>{day}</span>
-                      {mood&&<span style={{ fontSize:13, lineHeight:1 }}>{mood}</span>}
-                    </button>
-                    {isOpen&&<MoodPicker day={day} currentMood={mood} onSelect={setMood} onClear={clearMood} onClose={()=>setMoodPickerDay(null)} />}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Month list view - load summary info
-  if (!listLoaded) return (
-    <div style={{ padding:40, display:"flex", justifyContent:"center" }}>
-      <div style={{ width:28, height:28, borderRadius:14, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
-    </div>
-  );
-
-  return (
-    <div style={{ padding:"20px 20px 120px" }}>
-      <div style={{ marginBottom:24 }}>
-        <div style={{ fontSize:13, color:C.sub, letterSpacing:2, marginBottom:4 }}>月份計畫</div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end" }}>
-          <div style={{ fontSize:26, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text }}>{year}</div>
-          <SaveDot saving={saving} />
-        </div>
-      </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10 }}>
-        {MONTHS.map((label,i)=>{
-          const m=i+1, key=getKey(m), mData=monthCache[key]||{};
-          const hasPlan=mData.plan&&mData.plan.trim();
-          const moodCount=Object.values(mData.marked||{}).filter(Boolean).length;
-          const isCurrent=m===new Date().getMonth()+1&&year===new Date().getFullYear();
-          return (
-            <button key={m} onClick={()=>openMonth(m)} style={{ background:isCurrent?C.accentLight:C.card, borderRadius:14, padding:"14px 12px", display:"flex", flexDirection:"column", alignItems:"flex-start", gap:5, border:`1.5px solid ${isCurrent?C.accent+"50":C.border}`, cursor:"pointer", textAlign:"left" }}>
-              <div style={{ fontSize:15, fontWeight:600, color:isCurrent?C.accent:C.text }}>{label}</div>
-              {hasPlan&&<div style={{ fontSize:10, color:C.sub }}>📋 有計畫</div>}
-              {moodCount>0&&<div style={{ fontSize:10, color:C.sub }}>😊 {moodCount} 天</div>}
-              {!hasPlan&&moodCount===0&&<div style={{ fontSize:10, color:C.border }}>— 空白</div>}
+        <div style={{ flex:1, padding:"12px 0", overflowY:"auto" }}>
+          <div style={{ fontSize:11, color:C.sub, padding:"8px 20px 4px", letterSpacing:1 }}>模組</div>
+          {MODULES.map(m => (
+            <button key={m.id} onClick={()=>{ onSwitch(m.id); onClose(); }}
+              style={{ width:"100%", display:"flex", alignItems:"center", gap:12, padding:"13px 20px", background:currentModule===m.id?C.accentLight:"none", border:"none", cursor:"pointer", textAlign:"left", borderLeft:currentModule===m.id?`3px solid ${C.accent}`:"3px solid transparent" }}>
+              <span style={{ fontSize:20 }}>{m.emoji}</span>
+              <span style={{ fontSize:15, fontWeight:currentModule===m.id?600:400, color:currentModule===m.id?C.accent:C.text }}>{m.label}</span>
             </button>
-          );
-        })}
+          ))}
+        </div>
+        <div style={{ padding:"12px 20px 40px", borderTop:`1px solid ${C.border}`, display:"flex", flexDirection:"column", gap:8 }}>
+          <button onClick={()=>{ onSettings(); onClose(); }}
+            style={{ width:"100%", padding:"11px 0", borderRadius:10, border:`1.5px solid ${C.border}`, background:"none", color:C.text, fontSize:14, cursor:"pointer" }}>
+            ⚙️ 設定
+          </button>
+          <button onClick={onLogout}
+            style={{ width:"100%", padding:"11px 0", borderRadius:10, border:`1.5px solid ${C.red}`, background:"none", color:C.red, fontSize:14, cursor:"pointer" }}>
+            登出
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Daily Note ─────────────────────────────────────────────
-// Sheet key: "daily"  Row key: "YYYY-MM-DD"  Value: plain text
-function DailyNote({ user, saving, setSaving }) {
-  function toDateKey(d) {
-    // 確保格式統一為 YYYY-MM-DD（補零）
-    if (!d) return "";
-    const [y,m,day] = d.split(/[-\/]/);
-    return `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-  }
-  function localToday() {
-    // 用本地時間，避免 UTC 時差問題
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth()+1).padStart(2,'0');
-    const d = String(now.getDate()).padStart(2,'0');
-    return `${y}-${m}-${d}`;
-  }
-  const today = localToday();
-  const [date, setDate] = useState(today);
-  // 初始化時就把全域 CACHE 裡已有的今天資料同步進來
-  const [noteCache, setNoteCache] = useState(() => {
-    const init = {};
-    if (cacheHas(user, "daily", today)) {
-      init[today] = cacheGet(user, "daily", today) || "";
-    }
-    return init;
-  });
-  const timer = useRef(null);
-
-  useEffect(() => {
-    // 先看全域 CACHE 有沒有，有的話直接用，不打 API
-    if (cacheHas(user, "daily", date)) {
-      const cached = cacheGet(user, "daily", date);
-      setNoteCache(p => ({ ...p, [date]: cached || "" }));
-      return;
-    }
-    // 沒有才打 API
-    setNoteCache(p => ({ ...p })); // 觸發 null 狀態顯示轉圈
-    cachedReadOne(user, "daily", date).then(val => {
-      setNoteCache(p => ({ ...p, [date]: val || "" }));
-    });
-  }, [date]);
-
-  const note = noteCache[date] ?? null;
-
-  function save(text) {
-    setNoteCache(p => ({ ...p, [date]: text }));
-    cacheUpdate(user, "daily", date, text);
-    setSaving(p=>({...p,daily:true}));
-    clearTimeout(timer.current);
-    timer.current = setTimeout(async () => {
-      if (text) {
-        await writeOne(user, "daily", date, text);
-      } else {
-        await deleteOne(user, "daily", date);
-      }
-      setSaving(p=>({...p,daily:false}));
-    }, 1500);
-  }
-
-  const dateLabel = new Date(date+"T00:00:00").toLocaleDateString("zh-TW",{month:"long",day:"numeric",weekday:"long"});
-  return (
-    <div style={{ padding:"20px 20px 120px" }}>
-      <div style={{ marginBottom:16 }}>
-        <div style={{ fontSize:13, color:C.sub, letterSpacing:2, marginBottom:4 }}>當日記錄</div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-          <div style={{ fontSize:16, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text, flex:1, minWidth:0 }}>{dateLabel}</div>
-          <SaveDot saving={saving} />
-        </div>
-      </div>
-
-      <input type="date" value={date} onChange={e=>setDate(toDateKey(e.target.value))}
-        style={{ width:"100%", maxWidth:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"11px 14px", fontSize:14, color:C.text, background:C.card, outline:"none", marginBottom:16, display:"block", WebkitAppearance:"none", appearance:"none" }} />
-      {note === null ? (
-        <div style={{ padding:20, display:"flex", justifyContent:"center" }}>
-          <div style={{ width:28, height:28, borderRadius:14, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
-        </div>
-      ) : (
-        <>
-          {!note && <div style={{ textAlign:"center", padding:"20px 0 12px", color:C.sub, fontSize:14 }}>這天還沒有記錄</div>}
-          <textarea style={{ width:"100%", minHeight:260, border:`1.5px solid ${C.border}`, borderRadius:14, padding:16, fontSize:15, lineHeight:1.8, color:C.text, background:C.card, resize:"none", outline:"none", display:"block" }}
-            value={note} onChange={e=>save(e.target.value)} placeholder="今天發生了什麼事…" />
-          {note && <button onClick={()=>save("")} style={{ marginTop:10, background:"none", border:`1px solid ${C.red}`, color:C.red, borderRadius:8, padding:"7px 14px", cursor:"pointer", fontSize:13 }}>清除</button>}
-        </>
-      )}
-    </div>
-  );
-}
-
-// ── Settings ───────────────────────────────────────────────
-function SettingsModal({ user, password, plannerName, setPlannerName, onClose, onLogout }) {
+function SettingsModal({ user, password, plannerName, setPlannerName, onClose, onNicknameUpdate }) {
   const [name, setName] = useState(plannerName);
   const [nickname, setNickname] = useState("");
   const [msg, setMsg] = useState("");
   const [saving, setSaving] = useState(false);
 
-  function savePlannerName() {
-    const val=name.trim()||"計畫本";
-    setPlannerName(val); localStorage.setItem("plannerName_"+user,val);
-    setMsg("已儲存！"); setTimeout(()=>setMsg(""),2000);
+  async function savePlannerName() {
+    const val = name.trim()||"計畫本";
+    setPlannerName(val);
+    localStorage.setItem("plannerName_"+user, val);
+    // 存到 _users 第四欄
+    await apiCall({ action:"saveSetting", user, password, value:val });
+    setMsg("已儲存！"); setTimeout(()=>setMsg(""), 2000);
   }
   async function saveNickname() {
     if (!nickname.trim()) return;
     setSaving(true);
-    const res = await apiCall({action:"updateName",user,password,displayName:nickname.trim()});
+    const res = await apiCall({action:"updateName", user, password, displayName:nickname.trim()});
     setSaving(false);
-    if (res&&res.ok) { setMsg("暱稱已更新！"); setTimeout(()=>setMsg(""),2000); }
-    else setMsg("更新失敗");
+    if (res&&res.ok) {
+      setMsg("暱稱已更新！");
+      onNicknameUpdate && onNicknameUpdate(nickname.trim());
+      setTimeout(()=>setMsg(""), 2000);
+    } else setMsg("更新失敗");
   }
 
   return (
-    <div className="fade-in" style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.3)", zIndex:100, display:"flex", alignItems:"flex-end" }}>
+    <div className="fade-in" style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.3)", zIndex:300, display:"flex", alignItems:"flex-end" }}>
       <div style={{ width:"100%", maxWidth:430, margin:"0 auto", background:C.card, borderRadius:"20px 20px 0 0", padding:"24px 20px 48px" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
           <div style={{ fontSize:18, fontWeight:700, color:C.text }}>設定</div>
@@ -628,32 +200,48 @@ function SettingsModal({ user, password, plannerName, setPlannerName, onClose, o
               <button onClick={saveNickname} disabled={saving} style={{ background:C.accent, color:"#fff", border:"none", borderRadius:10, padding:"9px 12px", cursor:"pointer", fontSize:13, fontWeight:600, flexShrink:0, opacity:saving?0.7:1 }}>更新</button>
             </div>
           </div>
-          {msg&&<div style={{ fontSize:13, color:C.accent, textAlign:"center" }}>{msg}</div>}
-          <button onClick={onLogout} style={{ width:"100%", padding:"12px 0", borderRadius:12, border:`1.5px solid ${C.red}`, background:"none", color:C.red, fontSize:15, fontWeight:600, cursor:"pointer" }}>登出</button>
+          {msg && <div style={{ fontSize:13, color:C.accent, textAlign:"center" }}>{msg}</div>}
         </div>
       </div>
     </div>
   );
 }
 
-// ── Main App ───────────────────────────────────────────────
-const TABS = [
-  { id:"goals", label:"年度目標", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6"/><circle cx="10" cy="10" r="4" stroke="currentColor" strokeWidth="1.6"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/></svg> },
-  { id:"month", label:"月份計畫", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="M7 2v4M13 2v4M3 9h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg> },
-  { id:"daily", label:"當日記錄", icon:<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg> },
-];
-
-function MainApp({ user, password, displayName:initName }) {
+function MainShell({ user, password, displayName: displayName_prop }) {
   const thisYear = new Date().getFullYear();
-  const [year, setYear] = useState(thisYear);
-  const [tab, setTab] = useState(0);
-  const [saving, setSaving] = useState({goals:false,month:false,daily:false});
+  const [currentModule, setCurrentModule] = useState("planner");
+  const [saving, setSaving] = useState({goals:false, month:false, daily:false});
+  const [showMenu, setShowMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [plannerName, setPlannerName] = useState(localStorage.getItem("plannerName_"+user)||"計畫本");
-  const [appLoading, setAppLoading] = useState(true);
-  const touchStart = useRef(null);
 
-  // 進入 App 時預載入當年目標 + 當日記錄，同時存進快取
+  // 從 _users 第四欄載入計畫本名稱
+  useEffect(()=>{
+    apiCall({ action:"getSetting", user, password }).then(val => {
+      if (val && String(val).trim() && String(val) !== "null") {
+        const name = String(val).trim();
+        setPlannerName(name);
+        localStorage.setItem("plannerName_"+user, name);
+      }
+    });
+  },[]);
+  const [appLoading, setAppLoading] = useState(true);
+  const [displayName, setDisplayName] = useState(displayName_prop);
+  const shellTouchStart = useRef(null);
+
+  function handleShellTouchStart(e) {
+    shellTouchStart.current = e.touches[0].clientX;
+  }
+  function handleShellTouchEnd(e) {
+    if (shellTouchStart.current === null) return;
+    const diff = shellTouchStart.current - e.changedTouches[0].clientX;
+    // 從左邊滑出（往右滑）且起點在左側 80px 內 → 開漢堡選單
+    if (diff < -60 && shellTouchStart.current < 80) {
+      setShowMenu(true);
+    }
+    shellTouchStart.current = null;
+  }
+
   useEffect(()=>{
     const now = new Date();
     const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -663,79 +251,91 @@ function MainApp({ user, password, displayName:initName }) {
     ]).then(()=>setAppLoading(false));
   },[]);
 
+  function handleLogout() {
+    localStorage.removeItem("session");
+    window.location.reload();
+  }
+
   if (appLoading) return (
     <div style={{ height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16, background:C.bg }}>
       <div style={{ width:36, height:36, borderRadius:18, border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:"spin 0.8s linear infinite" }} />
-      <div style={{ color:C.sub, fontSize:14 }}>載入 {initName} 的資料…</div>
+      <div style={{ color:C.sub, fontSize:14 }}>載入 {displayName} 的資料…</div>
     </div>
   );
 
-  const handleTouchStart=e=>{touchStart.current=e.touches[0].clientX;};
-  const handleTouchEnd=e=>{
-    if(!touchStart.current) return;
-    const diff=touchStart.current-e.changedTouches[0].clientX;
-    if(Math.abs(diff)>50){ if(diff>0&&tab<2) setTab(t=>t+1); if(diff<0&&tab>0) setTab(t=>t-1); }
-    touchStart.current=null;
-  };
-  function handleLogout(){ localStorage.removeItem("session"); window.location.reload(); }
-  const yearOptions=Array.from({length:11},(_,i)=>thisYear-2+i);
+  const ActiveModule = MODULES.find(m => m.id === currentModule)?.component;
 
   return (
-    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:C.bg, maxWidth:430, margin:"0 auto", position:"relative", overflow:"hidden" }}>
-      <div style={{ padding:"52px 20px 14px", background:C.bg, flexShrink:0, borderBottom:`1px solid ${C.border}` }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <button onClick={()=>setShowSettings(true)} style={{ background:"none", border:"none", cursor:"pointer", textAlign:"left", padding:0 }}>
-            <div style={{ fontSize:20, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text }}>{plannerName}</div>
-            <div style={{ fontSize:12, color:C.sub, marginTop:2 }}>{initName} ✎</div>
-          </button>
-          {tab !== 2 && (
-            <select value={year} onChange={e=>setYear(Number(e.target.value))} style={{ border:`1.5px solid ${C.border}`, borderRadius:10, padding:"6px 10px", fontSize:14, color:C.text, background:C.card, outline:"none", cursor:"pointer" }}>
-              {yearOptions.map(y=><option key={y} value={y}>{y} 年</option>)}
-            </select>
-          )}
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:C.bg, maxWidth:430, margin:"0 auto", position:"relative", overflow:"hidden" }}
+      onTouchStart={handleShellTouchStart} onTouchEnd={handleShellTouchEnd}>
+      <div style={{ padding:"48px 20px 12px", background:C.bg, flexShrink:0, borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:12 }}>
+        <button onClick={()=>setShowMenu(true)}
+          style={{ background:"none", border:"none", cursor:"pointer", padding:4, display:"flex", flexDirection:"column", gap:4, flexShrink:0 }}>
+          <div style={{ width:20, height:2, background:C.text, borderRadius:1 }} />
+          <div style={{ width:20, height:2, background:C.text, borderRadius:1 }} />
+          <div style={{ width:20, height:2, background:C.text, borderRadius:1 }} />
+        </button>
+        <div style={{ flex:1, fontSize:16, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text }}>
+          {MODULES.find(m=>m.id===currentModule)?.emoji} {MODULES.find(m=>m.id===currentModule)?.label}
         </div>
+        <div style={{ fontSize:12, color:C.sub }}>{displayName}</div>
       </div>
 
-      <div style={{ flex:1, overflow:"hidden" }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-        <div className="swipe-container" style={{ transform:`translateX(${-tab*33.333}%)` }}>
-          <div className="swipe-panel">
-            <YearGoals user={user} saving={saving.goals} setSaving={setSaving} year={year} />
-          </div>
-          <div className="swipe-panel">
-            <MonthPlanner user={user} saving={saving.month} setSaving={setSaving} year={year} />
-          </div>
-          <div className="swipe-panel">
-            <DailyNote user={user} saving={saving.daily} setSaving={setSaving} />
-          </div>
-        </div>
+      <div style={{ flex:1, overflow:"hidden" }}>
+        {ActiveModule && (
+          <ActiveModule
+            user={user}
+            saving={saving}
+            setSaving={setSaving}
+            plannerName={plannerName}
+            onOpenSettings={()=>setShowSettings(true)}
+          />
+        )}
       </div>
 
-      <div style={{ background:"rgba(247,245,242,0.95)", backdropFilter:"blur(16px)", borderTop:`1px solid ${C.border}`, display:"flex", padding:"10px 0 28px", flexShrink:0 }}>
-        {TABS.map((t,i)=>(
-          <button key={t.id} onClick={()=>setTab(i)} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:"none", border:"none", cursor:"pointer", padding:"4px 0", color:tab===i?C.accent:C.sub, transition:"color 0.2s" }}>
-            {t.icon}
-            <div style={{ fontSize:10, fontWeight:tab===i?600:400 }}>{t.label}</div>
-          </button>
-        ))}
-      </div>
+      {showMenu && (
+        <HamburgerMenu
+          user={user}
+          displayName={displayName}
+          currentModule={currentModule}
+          onSwitch={setCurrentModule}
+          onSettings={()=>setShowSettings(true)}
+          onLogout={handleLogout}
+          onClose={()=>setShowMenu(false)}
+        />
+      )}
 
-      {showSettings&&(
-        <SettingsModal user={user} password={password} plannerName={plannerName} setPlannerName={setPlannerName}
-          onClose={()=>setShowSettings(false)} onLogout={handleLogout} />
+      {showSettings && (
+        <SettingsModal
+          user={user}
+          password={password}
+          plannerName={plannerName}
+          setPlannerName={setPlannerName}
+          onClose={()=>setShowSettings(false)}
+          onNicknameUpdate={newName => {
+            // 更新 session 裡的 displayName
+            const s = JSON.parse(localStorage.getItem("session"));
+            s.displayName = newName;
+            localStorage.setItem("session", JSON.stringify(s));
+            setDisplayName(newName);
+          }}
+        />
       )}
     </div>
   );
 }
 
 function Root() {
-  const [session, setSession] = useState(()=>{ try { return JSON.parse(localStorage.getItem("session")); } catch { return null; } });
-  function handleLogin(user,password,displayName) {
-    const s={user,password,displayName};
-    localStorage.setItem("session",JSON.stringify(s));
+  const [session, setSession] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("session")); } catch { return null; }
+  });
+  function handleLogin(user, password, displayName) {
+    const s = {user, password, displayName};
+    localStorage.setItem("session", JSON.stringify(s));
     setSession(s);
   }
   if (!session) return <CoverPage onLogin={handleLogin} />;
-  return <MainApp user={session.user} password={session.password} displayName={session.displayName} />;
+  return <MainShell user={session.user} password={session.password} displayName={session.displayName} />;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
