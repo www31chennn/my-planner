@@ -58,7 +58,7 @@ function AddExpenseModal({ user, defaultMonth, onSave, onClose }) {
           <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
             <span style={{ fontSize:24, color:C.sub, fontWeight:300 }}>NT$</span>
             <input
-              type="number" value={amount} onChange={e=>setAmount(e.target.value)}
+              type="number" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)}
               placeholder="0" autoFocus
               onKeyDown={e=>e.key==="Enter"&&handleSave()}
               style={{ width:160, border:"none", borderBottom:`2px solid ${C.accent}`, outline:"none", fontSize:40, fontFamily:"'Noto Serif TC',serif", fontWeight:700, color:C.text, textAlign:"center", background:"transparent", padding:"4px 0" }}

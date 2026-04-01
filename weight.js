@@ -57,7 +57,7 @@ function WeightInputModal({ date, currentWeight, onSave, onDelete, onClose }) {
 
         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:20 }}>
           <input
-            type="number" step="0.1" min="0" max="300"
+            type="number" inputMode="decimal" step="0.1" min="0" max="300"
             value={value} onChange={e=>setValue(e.target.value)}
             placeholder="70.0"
             autoFocus
@@ -234,7 +234,7 @@ function WeightApp({ user, password, saving, setSaving }) {
         {/* 身高輸入 */}
         {showHeightInput && (
           <div className="pop-in" style={{ marginTop:12, display:"flex", gap:8 }}>
-            <input type="number" value={heightInput} onChange={e=>setHeightInput(e.target.value)}
+            <input type="number" inputMode="decimal" value={heightInput} onChange={e=>setHeightInput(e.target.value)}
               placeholder="例如 165" min="100" max="250"
               style={{ flex:1, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"8px 12px", fontSize:15, outline:"none", background:C.bg, color:C.text }} />
             <span style={{ alignSelf:"center", color:C.sub, fontSize:13 }}>cm</span>

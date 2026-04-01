@@ -197,7 +197,7 @@ function SubModal({ sub, onSave, onClose }) {
           <div>
             <div style={label}>金額</div>
             <div style={{ display:"flex", gap:8 }}>
-              <input type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0" style={{ ...inp, flex:1 }} />
+              <input type="number" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0" style={{ ...inp, flex:1 }} />
               <div style={{ display:"flex", background:C.border, borderRadius:10, padding:3, flexShrink:0 }}>
                 {CURRENCIES.map(c => (
                   <button key={c} onClick={()=>setCurrency(c)}
