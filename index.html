@@ -345,18 +345,20 @@ function MainShell({ user, password, displayName: displayName_prop }) {
         <div style={{ fontSize:12, color:C.sub }}>{displayName}</div>
       </div>
 
-      <div style={{ flex:1, overflow:"hidden" }}>
-        {ActiveModule && (
-          <ActiveModule
-            user={user}
-            password={password}
-            displayName={displayName}
-            saving={saving}
-            setSaving={setSaving}
-            plannerName={plannerName}
-            onOpenSettings={()=>setShowSettings(true)}
-          />
-        )}
+      <div style={{ flex:1, overflow:"hidden", position:"relative" }}>
+        {MODULES.map(m => (
+          <div key={m.id} style={{ position:"absolute", inset:0, visibility:currentModule===m.id?"visible":"hidden", pointerEvents:currentModule===m.id?"auto":"none" }}>
+            <m.component
+              user={user}
+              password={password}
+              displayName={displayName}
+              saving={saving}
+              setSaving={setSaving}
+              plannerName={plannerName}
+              onOpenSettings={()=>setShowSettings(true)}
+            />
+          </div>
+        ))}
       </div>
 
       {showMenu && (
