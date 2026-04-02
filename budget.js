@@ -10,10 +10,11 @@ const CATEGORIES = [
 ];
 
 // ── 新增記帳 Modal ─────────────────────────────────────────
-function AddExpenseModal({ user, defaultMonth, onSave, onClose }) {
+function AddExpenseModal({ user, partner, defaultMonth, onSave, onClose }) {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState(CATEGORIES[0].id);
   const [note, setNote] = useState("");
+  const [whoFor, setWhoFor] = useState(user); // 預設是自己
   const [saving, setSaving] = useState(false);
 
   // 預設今天，但如果當前瀏覽月份不是今月，預設該月第一天
@@ -38,7 +39,7 @@ function AddExpenseModal({ user, defaultMonth, onSave, onClose }) {
       amount: Math.round(num),
       category,
       note: note.trim(),
-      who: user,
+      who: whoFor, // 誰的消費
       time: new Date().toLocaleTimeString("zh-TW", { hour:"2-digit", minute:"2-digit" }),
       date,
     });
@@ -50,7 +51,7 @@ function AddExpenseModal({ user, defaultMonth, onSave, onClose }) {
     <div style={{ position:"fixed", inset:0, zIndex:999, display:"flex", alignItems:"flex-end", background:"rgba(0,0,0,0.2)" }}
       onClick={onClose}>
       <div className="pop-in" onClick={e=>e.stopPropagation()}
-        style={{ width:"100%", maxWidth:430, margin:"0 auto", background:C.card, borderRadius:"20px 20px 0 0", padding:"24px 20px 40px" }}>
+        style={{ width:"100%", maxWidth:430, margin:"0 auto", background:C.card, borderRadius:"20px 20px 0 0", padding:"24px 20px 40px", maxHeight:"90vh", overflowY:"auto" }}>
 
         {/* 金額輸入 */}
         <div style={{ textAlign:"center", marginBottom:24 }}>
@@ -72,8 +73,23 @@ function AddExpenseModal({ user, defaultMonth, onSave, onClose }) {
             style={{ width:"100%", border:`1.5px solid ${C.border}`, borderRadius:12, padding:"10px 14px", fontSize:14, color:C.text, background:C.bg, outline:"none", WebkitAppearance:"none", appearance:"none" }} />
         </div>
 
+        {/* 誰的消費（只有共同記帳才顯示）*/}
+        {partner && (
+          <div style={{ marginBottom:6 }}>
+            <div style={{ fontSize:12, color:C.sub, marginBottom:8, textAlign:"center" }}>誰的消費</div>
+            <div style={{ display:"flex", background:C.border, borderRadius:10, padding:3 }}>
+              {[user, partner].map(p => (
+                <button key={p} onClick={()=>setWhoFor(p)}
+                  style={{ flex:1, padding:"10px 0", borderRadius:8, border:"none", cursor:"pointer", fontSize:14, fontWeight:whoFor===p?600:400, color:whoFor===p?C.text:C.sub, background:whoFor===p?C.card:"transparent", transition:"all 0.2s" }}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 類別選擇 */}
-        <div style={{ display:"flex", gap:8, marginBottom:16, justifyContent:"center" }}>
+        <div style={{ display:"flex", gap:8, justifyContent:"center", marginTop:4, marginBottom:16 }}>
           {CATEGORIES.map(c => (
             <button key={c.id} onClick={()=>setCategory(c.id)}
               style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, padding:"10px 12px", borderRadius:12, border:`1.5px solid ${category===c.id?C.accent:C.border}`, background:category===c.id?C.accentLight:C.bg, cursor:"pointer", transition:"all 0.15s", minWidth:52 }}>
@@ -205,7 +221,22 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
   }
 
   function handleAdd(expense) {
-    save([expense, ...myRecords]);
+    if (expense.who === user) {
+      // 存到自己的記錄
+      save([expense, ...myRecords]);
+    } else {
+      // 存到 partner 的記錄
+      const nextPartner = [expense, ...partnerRecords];
+      setPartnerRecords(nextPartner);
+      const pKey = `${partner}_${viewMonth}`;
+      cacheSet("_shared", SHEET, pKey, JSON.stringify(nextPartner));
+      setSaving(p=>({...p, budget:true}));
+      clearTimeout(timer.current);
+      timer.current = setTimeout(async () => {
+        await writeOne("_shared", SHEET, pKey, JSON.stringify(nextPartner));
+        setSaving(p=>({...p, budget:false}));
+      }, 1500);
+    }
     setShowAdd(false);
   }
 
@@ -327,7 +358,7 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
           <div style={{ fontSize:13 }}>點下方 + 新增第一筆</div>
         </div>
       ) : (
-        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           {filteredRecords.map((r,i) => {
             const cat = CATEGORIES.find(c=>c.id===r.category) || CATEGORIES[4];
             const rDate = r.date ? new Date(r.date+"T00:00:00") : new Date(r.id);
@@ -375,6 +406,7 @@ function BudgetApp({ user, password, saving, setSaving, displayName }) {
       {showAdd && (
         <AddExpenseModal
           user={user}
+          partner={partner||""}
           defaultMonth={viewMonth}
           onSave={handleAdd}
           onClose={()=>setShowAdd(false)}
